@@ -58,10 +58,7 @@
           "android": {
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0",
-            "extraMavenRepos": [
-              "https://maven.expo.dev/repository/maven-public"
-            ]
+            "buildToolsVersion": "34.0.0"
           }
         }
       ]

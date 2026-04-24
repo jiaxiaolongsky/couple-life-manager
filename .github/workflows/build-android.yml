@@ -24,23 +24,18 @@ jobs:
           java-version: '17'
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Setup EAS
-        run: npm install -g eas-cli
+        run: |
+          npm install
+          npx expo install --fix
 
       - name: Prebuild Android
         run: npx expo prebuild --platform android --no-install
-
-      - name: Force Fix Dependencies
-        run: |
-          sed -i 's/google()/maven { url "https:\/\/maven.expo.dev\/repository\/maven-public" }\n        google()/g' android/build.gradle
 
       - name: Build with Gradle
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
