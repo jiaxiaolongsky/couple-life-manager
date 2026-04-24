@@ -33,6 +33,10 @@ jobs:
       - name: Prebuild Android
         run: npx expo prebuild --platform android --no-install
 
+      - name: Force Fix Dependencies
+        run: |
+          sed -i 's/google()/maven { url "https:\/\/maven.expo.dev\/repository\/maven-public" }\n        google()/g' android/build.gradle
+
       - name: Build with Gradle
         run: |
           cd android
