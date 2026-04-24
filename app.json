@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "couple-life-manager",
+    "name": "伴侣生活家",
     "slug": "couple-life-manager",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,9 +9,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.coupleapp.lifemanager"
     },
     "android": {
+      "package": "com.coupleapp.lifemanager",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -23,7 +25,17 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro",
+      "pwa": {
+        "enabled": true,
+        "name": "伴侣生活家",
+        "shortName": "生活家",
+        "themeColor": "#FF7F50",
+        "backgroundColor": "#FFF5EE",
+        "display": "standalone",
+        "orientation": "portrait"
+      }
     },
     "plugins": [
       "expo-router",
@@ -38,11 +50,28 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0"
+          }
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2283bee0-21ab-4f41-90ac-8c9fc9f5f35a"
+      }
     }
   }
 }
