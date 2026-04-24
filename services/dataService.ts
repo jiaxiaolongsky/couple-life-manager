@@ -330,15 +330,29 @@ export const inventoryService = {
     await this.saveInventory(items);
   },
 
-  // 更新库存数量
-  async updateStock(id: string, newStock: number): Promise<void> {
+  // 更新库存物品
+  async updateInventoryItem(id: string, updates: Partial<InventoryItem>): Promise<void> {
     const items = await this.getInventory();
     const index = items.findIndex(item => item.id === id);
     if (index !== -1) {
-      items[index].currentStock = newStock;
-      items[index].lastRestocked = new Date().toISOString().split('T')[0];
+      items[index] = { ...items[index], ...updates };
+      if (updates.currentStock !== undefined) {
+        items[index].lastRestocked = new Date().toISOString().split('T')[0];
+      }
       await this.saveInventory(items);
     }
+  },
+
+  // 更新库存数量
+  async updateStock(id: string, newStock: number): Promise<void> {
+    await this.updateInventoryItem(id, { currentStock: newStock });
+  },
+
+  // 删除库存物品
+  async deleteInventoryItem(id: string): Promise<void> {
+    const items = await this.getInventory();
+    const filtered = items.filter(item => item.id !== id);
+    await this.saveInventory(filtered);
   },
 
   // 获取需要补货的物品
@@ -351,15 +365,18 @@ export const inventoryService = {
 // 初始化示例数据
 export const initializeSampleData = async (): Promise<void> => {
   // 检查是否已初始化
-  const initialized = await AsyncStorage.getItem('initialized');
-  if (initialized) return;
+  const initialized = await AsyncStorage.getItem('app_initialized');
+  if (initialized === 'true') return;
+
+  // 立即标记为已初始化，防止重复执行
+  await AsyncStorage.setItem('app_initialized', 'true');
 
   // 示例菜品
   const sampleDishes: Dish[] = [
     {
       id: '1',
       name: '煎蛋三明治',
-      category: 'breakfast',
+      category: '早餐',
       ingredients: ['鸡蛋', '面包', '黄油', '生菜'],
       calories: 350,
       favorite: true,
@@ -367,7 +384,7 @@ export const initializeSampleData = async (): Promise<void> => {
     {
       id: '2',
       name: '番茄炒蛋',
-      category: 'lunch',
+      category: '午餐',
       ingredients: ['番茄', '鸡蛋', '葱'],
       calories: 280,
       favorite: true,
@@ -375,15 +392,15 @@ export const initializeSampleData = async (): Promise<void> => {
     {
       id: '3',
       name: '红烧肉',
-      category: 'dinner',
+      category: '晚餐',
       ingredients: ['五花肉', '姜', '葱', '冰糖', '酱油'],
       calories: 450,
       favorite: false,
     },
     {
       id: '4',
-      name: '水果沙拉',
-      category: 'snack',
+      name: '零食',
+      category: '加餐',
       ingredients: ['苹果', '香蕉', '葡萄', '酸奶'],
       calories: 150,
       favorite: true,
@@ -395,18 +412,18 @@ export const initializeSampleData = async (): Promise<void> => {
     {
       id: '1',
       date: new Date().toISOString().split('T')[0],
-      amount: 25.5,
-      category: 'food',
-      description: '午餐外卖',
+      amount: 50,
+      category: '餐饮',
+      description: '午餐',
       payer: 'me',
       paymentMethod: 'wechat',
     },
     {
       id: '2',
       date: new Date().toISOString().split('T')[0],
-      amount: 120,
-      category: 'shopping',
-      description: '超市购物',
+      amount: 200,
+      category: '购物',
+      description: '超市买菜',
       payer: 'partner',
       paymentMethod: 'alipay',
     },
@@ -417,7 +434,7 @@ export const initializeSampleData = async (): Promise<void> => {
     {
       id: '1',
       name: '牛奶',
-      category: 'daily',
+      category: '日用品',
       quantity: 2,
       unit: '瓶',
       purchased: false,
@@ -426,7 +443,7 @@ export const initializeSampleData = async (): Promise<void> => {
     {
       id: '2',
       name: '生菜',
-      category: 'vegetable',
+      category: '蔬菜',
       quantity: 1,
       unit: '把',
       purchased: true,
@@ -439,7 +456,7 @@ export const initializeSampleData = async (): Promise<void> => {
     {
       id: '1',
       name: '大米',
-      category: 'food',
+      category: '食品',
       currentStock: 2,
       minStock: 5,
       unit: 'kg',
@@ -448,7 +465,7 @@ export const initializeSampleData = async (): Promise<void> => {
     {
       id: '2',
       name: '洗衣液',
-      category: 'daily',
+      category: '日用品',
       currentStock: 1,
       minStock: 1,
       unit: '瓶',
@@ -472,5 +489,4 @@ export const initializeSampleData = async (): Promise<void> => {
   await shoppingService.saveShoppingList(sampleShopping);
   await inventoryService.saveInventory(sampleInventory);
   await anniversaryService.addAnniversary(sampleAnniversaries[0]);
-  await AsyncStorage.setItem('initialized', 'true');
 };

@@ -6,7 +6,7 @@ import { Plus, Wallet, TrendingUp, Calendar, ChevronRight, FileText } from 'luci
 import { expenseService } from '@/services/dataService';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Card, Button, Avatar, List, IconButton, Chip } from 'react-native-paper';
+import { Card, Button, Avatar, List, IconButton, Chip, Portal, Modal, TextInput } from 'react-native-paper';
 import { Expense } from '@/types';
 
 const screenWidth = Dimensions.get('window').width;
@@ -18,6 +18,47 @@ export default function FinanceScreen() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalAmount, setTotalAmount] = useState(0);
   const [categoryStats, setCategoryStats] = useState<any[]>([]);
+
+  const [visible, setVisible] = useState(false);
+  const [newAmount, setNewAmount] = useState('');
+  const [newDesc, setNewDesc] = useState('');
+  const [newCategory, setNewCategory] = useState('餐饮');
+
+  const showModal = () => setVisible(true);
+  const hideModal = () => {
+    setVisible(false);
+    setNewAmount('');
+    setNewDesc('');
+  };
+
+  const handleAddExpense = async () => {
+    if (!newAmount || isNaN(Number(newAmount))) {
+      alert('请输入有效金额');
+      return;
+    }
+
+    const categoryMap: Record<string, string> = {
+      '餐饮': 'food',
+      '购物': 'shopping',
+      '交通': 'transport',
+      '娱乐': 'entertainment',
+      '其他': 'other'
+    };
+
+    const newExpense: Expense = {
+      id: Date.now().toString(),
+      amount: Number(newAmount),
+      description: newDesc,
+      category: categoryMap[newCategory] || 'other',
+      date: new Date().toISOString().split('T')[0],
+      payer: 'me',
+      paymentMethod: 'wechat',
+    };
+
+    await expenseService.addExpense(newExpense);
+    hideModal();
+    loadData();
+  };
 
   useEffect(() => {
     loadData();
@@ -53,6 +94,40 @@ export default function FinanceScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
+      <Portal>
+        <Modal visible={visible} onDismiss={hideModal} contentContainerStyle={[styles.modal, { backgroundColor: theme.card }]}>
+          <Text style={[styles.modalTitle, { color: theme.text }]}>新增账单</Text>
+          <TextInput
+            label="金额"
+            value={newAmount}
+            onChangeText={setNewAmount}
+            keyboardType="numeric"
+            mode="outlined"
+            style={styles.input}
+          />
+          <TextInput
+            label="描述"
+            value={newDesc}
+            onChangeText={setNewDesc}
+            mode="outlined"
+            style={styles.input}
+          />
+          <View style={styles.categoryRow}>
+            {['餐饮', '购物', '交通', '娱乐', '其他'].map((cat) => (
+              <Chip 
+                key={cat} 
+                selected={newCategory === cat} 
+                onPress={() => setNewCategory(cat)}
+                style={styles.chip}
+              >
+                {cat}
+              </Chip>
+            ))}
+          </View>
+          <Button mode="contained" onPress={handleAddExpense} style={styles.saveButton}>保存</Button>
+        </Modal>
+      </Portal>
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Monthly Summary Card */}
         <Card style={[styles.summaryCard, { backgroundColor: theme.primary }]}>
@@ -140,7 +215,7 @@ export default function FinanceScreen() {
       {/* Floating Action Button */}
       <TouchableOpacity 
         style={[styles.fab, { backgroundColor: theme.primary }]}
-        onPress={() => {}}
+        onPress={showModal}
       >
         <Plus color="#fff" size={32} />
       </TouchableOpacity>
@@ -280,5 +355,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 4,
+  },
+  modal: {
+    margin: 20,
+    padding: 20,
+    borderRadius: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  input: {
+    marginBottom: 15,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 20,
+  },
+  chip: {
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  saveButton: {
+    marginTop: 10,
+    paddingVertical: 5,
   },
 });

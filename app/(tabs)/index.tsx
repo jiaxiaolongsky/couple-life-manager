@@ -1,8 +1,9 @@
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { anniversaryService, expenseService, initializeSampleData, inventoryService, mealPlanService, shoppingService } from '@/services/dataService';
+import { WeatherData, weatherService } from '@/services/weatherService';
 import { useRouter } from 'expo-router';
-import { AlertTriangle, Camera, ChevronRight, Heart, Plus, ShoppingBag, TrendingUp, Utensils, Wallet } from 'lucide-react-native';
+import { AlertTriangle, Camera, ChevronRight, CloudSun, Heart, Plus, ShoppingBag, TrendingUp, Utensils, Wallet } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Avatar, Button, Card, ProgressBar } from 'react-native-paper';
@@ -18,16 +19,30 @@ export default function HomeScreen() {
   const [lowStockCount, setLowStockCount] = useState(0);
   const [todayMeal, setTodayMeal] = useState<any>(null);
   const [nextAnniversary, setNextAnniversary] = useState<any>(null);
+  const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [weatherLoading, setWeatherLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [greeting, setGreeting] = useState('早安');
 
   useEffect(() => {
     loadData();
+    updateGreeting();
   }, []);
+
+  const updateGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 11) setGreeting('早安');
+    else if (hour >= 11 && hour < 13) setGreeting('午安');
+    else if (hour >= 13 && hour < 18) setGreeting('下午好');
+    else if (hour >= 18 && hour < 24) setGreeting('晚上好');
+    else setGreeting('夜深了');
+  };
 
   const loadData = async () => {
     try {
       setLoading(true);
+      setWeatherLoading(true);
       await initializeSampleData();
       
       const total = await expenseService.getTotalExpenses();
@@ -46,6 +61,16 @@ export default function HomeScreen() {
       const annis = await anniversaryService.getAnniversaries();
       if (annis.length > 0) {
         setNextAnniversary(annis[0]); // 假设已按时间排序
+      }
+
+      // 加载天气
+      try {
+        const weatherData = await weatherService.getCurrentWeather();
+        setWeather(weatherData);
+      } catch (e) {
+        console.error('Weather fetch error in component:', e);
+      } finally {
+        setWeatherLoading(false);
       }
     } catch (error) {
       console.error('加载数据失败:', error);
@@ -77,11 +102,55 @@ export default function HomeScreen() {
         {/* Header Section */}
         <View style={styles.header}>
           <View>
-            <Text style={[styles.greeting, { color: theme.text }]}>早安，亲爱的</Text>
+            <Text style={[styles.greeting, { color: theme.text }]}>{greeting}，亲爱的</Text>
             <Text style={[styles.date, { color: theme.icon }]}>{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</Text>
           </View>
           <Avatar.Text size={48} label="US" style={{ backgroundColor: theme.primary }} color="#fff" />
         </View>
+
+        {/* Weather Tip Section */}
+        {weatherLoading ? (
+          <Card style={[styles.weatherCard, { backgroundColor: theme.card }]}>
+            <Card.Content style={styles.weatherContent}>
+              <View style={styles.weatherMain}>
+                <CloudSun size={32} color={theme.icon} />
+                <View style={{ marginLeft: 12 }}>
+                  <Text style={[styles.weatherTemp, { color: theme.icon }]}>正在获取天气...</Text>
+                </View>
+              </View>
+            </Card.Content>
+          </Card>
+        ) : weather ? (
+          <Card style={[styles.weatherCard, { backgroundColor: theme.card }]}>
+            <Card.Content style={styles.weatherContent}>
+              <View style={styles.weatherMain}>
+                <CloudSun size={32} color={theme.primary} />
+                <View style={{ marginLeft: 12 }}>
+                  <Text style={[styles.weatherTemp, { color: theme.text }]}>{weather.temp} · {weather.condition}</Text>
+                  <Text style={[styles.weatherCity, { color: theme.icon }]}>{weather.city}</Text>
+                </View>
+              </View>
+              <View style={styles.weatherTipContainer}>
+                <Text style={[styles.weatherTip, { color: theme.text }]}>{weather.tip}</Text>
+              </View>
+            </Card.Content>
+          </Card>
+        ) : (
+          <Card style={[styles.weatherCard, { backgroundColor: theme.card }]}>
+            <Card.Content style={styles.weatherContent}>
+              <View style={styles.weatherMain}>
+                <CloudSun size={32} color={theme.icon} />
+                <View style={{ marginLeft: 12 }}>
+                  <Text style={[styles.weatherTemp, { color: theme.text }]}>天气不可用</Text>
+                  <Text style={[styles.weatherCity, { color: theme.icon }]}>点击重试</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={loadData} style={{ padding: 8 }}>
+                <TrendingUp size={20} color={theme.primary} />
+              </TouchableOpacity>
+            </Card.Content>
+          </Card>
+        )}
 
         {/* Stats Summary */}
         <View style={styles.statsContainer}>
@@ -300,7 +369,39 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 14,
   },
-  quickActionsRow: {
+  weatherCard: {
+    borderRadius: 16,
+    marginBottom: 20,
+    elevation: 2,
+  },
+  weatherContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  weatherMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  weatherTemp: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  weatherCity: {
+    fontSize: 12,
+  },
+  weatherTipContainer: {
+    flex: 1,
+    marginLeft: 15,
+    paddingLeft: 15,
+    borderLeftWidth: 1,
+    borderLeftColor: '#eee',
+  },
+  weatherTip: {
+    fontSize: 14,
+    fontStyle: 'italic',
+  },
+  sectionTitle: {
     marginBottom: 20,
     marginHorizontal: -5,
   },
