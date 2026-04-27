@@ -4,12 +4,13 @@ import { dishCategoryService, dishService, mealPlanService } from '@/services/da
 import { Dish, DishCategory, MealPlan } from '@/types';
 import { addDays, format, subDays } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { Calendar, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Coffee, Cookie, Edit2, GripVertical, Heart, Moon, Plus, Sun, Trash2, Utensils } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Coffee, Cookie, Edit2, GripVertical, Heart, Image as ImageIcon, Moon, Plus, Sun, Trash2, Upload, Utensils } from 'lucide-react-native';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import 'react-native-gesture-handler';
-import { Button, Card, Chip, FAB, IconButton, Searchbar, SegmentedButtons, TextInput } from 'react-native-paper';
+import { ActivityIndicator, Button, Card, Chip, FAB, IconButton, Searchbar, SegmentedButtons, TextInput } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function MealsScreen() {
@@ -22,6 +23,7 @@ export default function MealsScreen() {
   const [activeCategoryId, setActiveCategoryId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isManageMode, setIsManageMode] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Planning states
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -148,19 +150,45 @@ export default function MealsScreen() {
   }, [dishes, activeCategoryId, searchQuery]);
 
   const handleSaveDish = async () => {
-    if (!editingDish?.name || !editingDish?.categoryId) return;
+    if (!editingDish?.name || !editingDish?.categoryId) {
+      Alert.alert('提示', '请填写菜品名称并选择分类');
+      return;
+    }
     
     try {
       if (editingDish.id) {
         await dishService.updateDish(editingDish.id, editingDish);
       } else {
-        await dishService.addDish(editingDish as Omit<Dish, 'id'>);
+        await dishService.addDish(editingDish as Dish);
       }
       setIsDishModalVisible(false);
+      setEditingDish(null);
       loadData();
     } catch (error: any) {
       console.error('保存菜品失败:', error);
       Alert.alert('保存失败', `请检查网络连接: ${error.message || '未知错误'}`);
+    }
+  };
+
+  const handlePickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+
+    if (!result.canceled && result.assets[0].uri) {
+      try {
+        setIsUploading(true);
+        const imageUrl = await dishService.uploadDishImage(result.assets[0].uri);
+        setEditingDish(prev => prev ? { ...prev, image: imageUrl } : null);
+      } catch (error: any) {
+        console.error('上传图片失败:', error);
+        Alert.alert('上传失败', '无法上传图片，请检查网络或 Supabase 存储配置');
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -223,10 +251,13 @@ export default function MealsScreen() {
           activeOpacity={0.7}
           style={[
             styles.categoryTab,
-            isSelected && [styles.activeCategoryTab, { backgroundColor: theme.primary + '10' }],
-            isActive && { backgroundColor: theme.primary + '20' }
+            isSelected && styles.activeCategoryTab,
+            isActive && { backgroundColor: theme.primary + '10' }
           ]}
         >
+          {isSelected && (
+            <View style={[styles.activeCategoryIndicator, { backgroundColor: theme.primary }]} />
+          )}
           <View style={styles.categoryMainRow}>
             {isManageMode && (
               <View style={styles.dragHandle}>
@@ -237,7 +268,6 @@ export default function MealsScreen() {
               numberOfLines={1}
               style={[
                 styles.categoryText,
-                { color: isSelected ? theme.primary : theme.text },
                 isSelected && styles.activeCategoryText
               ]}
             >
@@ -311,70 +341,85 @@ export default function MealsScreen() {
 
   const renderDishItem = ({ item }: { item: Dish }) => (
     <Card style={[styles.dishCard, { backgroundColor: theme.card }]} mode="elevated">
-      <Card.Content style={styles.dishContent}>
-        <View style={styles.dishInfo}>
-          <Text style={[styles.dishName, { color: theme.text }]}>{item.name}</Text>
-          <Text style={[styles.dishCategory, { color: theme.icon }]}>
-            {categories.find(c => c.id === item.categoryId)?.name}
-          </Text>
-        </View>
-        <View style={styles.dishActions}>
-          <TouchableOpacity 
-            onPress={async () => {
-              try {
-                await dishService.updateDish(item.id, { favorite: !item.favorite });
-                loadData();
-              } catch (error: any) {
-                console.error('收藏更新失败:', error);
-                Alert.alert('更新失败', `请检查网络连接: ${error.message || '未知错误'}`);
-              }
-            }}
-            style={styles.actionBtn}
-          >
-            <Heart size={20} color={item.favorite ? '#FF5252' : theme.icon} fill={item.favorite ? '#FF5252' : 'none'} />
-          </TouchableOpacity>
-          {isManageMode && (
-            <>
-              <TouchableOpacity 
-                onPress={() => {
-                  setEditingDish(item);
-                  setIsDishModalVisible(true);
-                }}
-                style={styles.actionBtn}
-              >
-                <Edit2 size={20} color={theme.primary} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                onPress={() => {
-                  Alert.alert(
-                    '删除菜品',
-                    `确定要删除 "${item.name}" 吗？`,
-                    [
-                      { text: '取消', style: 'cancel' },
-                      { 
-                        text: '删除', 
-                        style: 'destructive',
-                        onPress: async () => {
-                          try {
-                            await dishService.deleteDish(item.id);
-                            loadData();
-                          } catch (error: any) {
-                            console.error('删除菜品失败:', error);
-                            Alert.alert('删除失败', `请检查网络连接: ${error.message || '未知错误'}`);
+      <View style={styles.dishCardInner}>
+        {item.image ? (
+          <Image source={{ uri: item.image }} style={styles.dishThumbnail} />
+        ) : (
+          <View style={[styles.dishThumbnailPlaceholder, { backgroundColor: theme.primary + '10' }]}>
+            <Utensils size={24} color={theme.primary} opacity={0.3} />
+          </View>
+        )}
+        <View style={styles.dishContent}>
+          <View style={styles.dishInfo}>
+            <Text style={[styles.dishName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
+            <Text style={[styles.dishCategory, { color: theme.icon }]}>
+              {categories.find(c => c.id === item.categoryId)?.name}
+            </Text>
+            <View style={styles.dishTags}>
+              <View style={[styles.tag, { backgroundColor: '#FFF5F5' }]}>
+                <Text style={styles.tagText}>好评如潮</Text>
+              </View>
+              <Text style={styles.salesText}>月售 100+</Text>
+            </View>
+          </View>
+          <View style={styles.dishActions}>
+            <TouchableOpacity 
+              onPress={async () => {
+                try {
+                  await dishService.updateDish(item.id, { favorite: !item.favorite });
+                  loadData();
+                } catch (error: any) {
+                  console.error('收藏更新失败:', error);
+                  Alert.alert('更新失败', `请检查网络连接: ${error.message || '未知错误'}`);
+                }
+              }}
+              style={styles.actionBtn}
+            >
+              <Heart size={20} color={item.favorite ? '#FF5252' : theme.icon} fill={item.favorite ? '#FF5252' : 'none'} />
+            </TouchableOpacity>
+            {isManageMode && (
+              <>
+                <TouchableOpacity 
+                  onPress={() => {
+                    setEditingDish(item);
+                    setIsDishModalVisible(true);
+                  }}
+                  style={styles.actionBtn}
+                >
+                  <Edit2 size={20} color={theme.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={() => {
+                    Alert.alert(
+                      '删除菜品',
+                      `确定要删除 "${item.name}" 吗？`,
+                      [
+                        { text: '取消', style: 'cancel' },
+                        { 
+                          text: '删除', 
+                          style: 'destructive',
+                          onPress: async () => {
+                            try {
+                              await dishService.deleteDish(item.id);
+                              loadData();
+                            } catch (error: any) {
+                              console.error('删除菜品失败:', error);
+                              Alert.alert('删除失败', `请检查网络连接: ${error.message || '未知错误'}`);
+                            }
                           }
                         }
-                      }
-                    ]
-                  );
-                }}
-                style={styles.actionBtn}
-              >
-                <Trash2 size={20} color="#FF5252" />
-              </TouchableOpacity>
-            </>
-          )}
+                      ]
+                    );
+                  }}
+                  style={styles.actionBtn}
+                >
+                  <Trash2 size={20} color="#FF5252" />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
-      </Card.Content>
+      </View>
     </Card>
   );
 
@@ -465,14 +510,16 @@ export default function MealsScreen() {
               <TouchableOpacity
                 style={[
                   styles.categoryTab,
-                  activeCategoryId === 'all' && [styles.activeCategoryTab, { backgroundColor: theme.primary + '10' }]
+                  activeCategoryId === 'all' && styles.activeCategoryTab
                 ]}
                 onPress={() => setActiveCategoryId('all')}
                 activeOpacity={0.7}
               >
+                {activeCategoryId === 'all' && (
+                  <View style={[styles.activeCategoryIndicator, { backgroundColor: theme.primary }]} />
+                )}
                 <Text style={[
                   styles.categoryText,
-                  { color: activeCategoryId === 'all' ? theme.primary : theme.text },
                   activeCategoryId === 'all' && styles.activeCategoryText
                 ]}>全部</Text>
               </TouchableOpacity>
@@ -632,10 +679,31 @@ export default function MealsScreen() {
               {editingDish?.id ? '编辑菜品' : '新增菜品'}
             </Text>
             
+            <View style={styles.imageUploadContainer}>
+              {isUploading ? (
+                <View style={styles.imagePlaceholder}>
+                  <ActivityIndicator color={theme.primary} />
+                  <Text style={{ marginTop: 8, color: theme.icon }}>上传中...</Text>
+                </View>
+              ) : editingDish?.image ? (
+                <TouchableOpacity onPress={handlePickImage} style={styles.imagePreviewContainer}>
+                  <Image source={{ uri: editingDish.image }} style={styles.imagePreview} />
+                  <View style={styles.imageEditOverlay}>
+                    <Upload size={20} color="#FFF" />
+                  </View>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={handlePickImage} style={styles.imagePlaceholder}>
+                  <ImageIcon size={32} color={theme.icon} />
+                  <Text style={{ marginTop: 8, color: theme.icon }}>添加图片</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             <TextInput
               label="菜品名称"
               value={editingDish?.name}
-              onChangeText={text => setEditingDish({...editingDish, name: text})}
+              onChangeText={text => setEditingDish(prev => prev ? {...prev, name: text} : null)}
               style={styles.input}
               mode="outlined"
             />
@@ -835,39 +903,43 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(0,0,0,0.05)',
   },
   leftColumn: {
-    width: 100,
-    backgroundColor: '#FAFAFA',
+    width: 85,
+    backgroundColor: '#F7F8FA',
     borderRightWidth: 1,
+    borderRightColor: '#EBEBEB',
   },
   rightColumn: {
     flex: 1,
     backgroundColor: '#FFF',
   },
   categoryTab: {
-    paddingVertical: 16,
-    paddingHorizontal: 8,
+    paddingVertical: 18,
+    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 64,
-    borderLeftWidth: 4,
-    borderLeftColor: 'transparent',
+    minHeight: 60,
   },
   activeCategoryTab: {
-    borderLeftColor: '#FF6B6B',
+    backgroundColor: '#FFF',
   },
-  categoryMainRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
+  activeCategoryIndicator: {
+    position: 'absolute',
+    left: 0,
+    top: 20,
+    bottom: 20,
+    width: 4,
+    borderRadius: 2,
   },
   categoryText: {
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
-    fontWeight: '500',
+    color: '#666',
+    fontWeight: '400',
   },
   activeCategoryText: {
+    color: '#222',
     fontWeight: 'bold',
+    fontSize: 14,
   },
   catManagePanel: {
     width: '100%',
@@ -916,7 +988,7 @@ const styles = StyleSheet.create({
   },
   dishList: {
     padding: 16,
-    gap: 16,
+    gap: 12,
   },
   dishCard: {
     borderRadius: 16,
@@ -925,34 +997,104 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowRadius: 10,
+    marginBottom: 4,
+  },
+  dishCardInner: {
+    flexDirection: 'row',
+  },
+  dishThumbnail: {
+    width: 90,
+    height: 90,
+    borderRadius: 12,
+    margin: 12,
+  },
+  dishThumbnailPlaceholder: {
+    width: 90,
+    height: 90,
+    borderRadius: 12,
+    margin: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dishContent: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingRight: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 4,
   },
   dishInfo: {
     flex: 1,
-    paddingLeft: 4,
+    justifyContent: 'center',
   },
   dishName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
+    marginBottom: 4,
   },
   dishCategory: {
     fontSize: 12,
-    marginTop: 4,
-    opacity: 0.6,
+    marginBottom: 6,
+  },
+  dishTags: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  tagText: {
+    fontSize: 10,
+    color: '#FF6B6B',
+    fontWeight: 'bold',
+  },
+  salesText: {
+    fontSize: 11,
+    color: '#999',
   },
   dishActions: {
-    flexDirection: 'row',
-    gap: 4,
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    paddingLeft: 8,
   },
   actionBtn: {
-    padding: 8,
-    borderRadius: 8,
+    padding: 4,
+  },
+  imageUploadContainer: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  imagePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#DDD',
+    backgroundColor: '#F9F9F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imagePreviewContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  imageEditOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fab: {
     position: 'absolute',

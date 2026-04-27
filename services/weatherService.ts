@@ -77,30 +77,74 @@ export const weatherService = {
       let response;
       try {
         response = await fetch(`https://wttr.in/${latitude},${longitude}?format=j1&lang=zh`, {
-          signal: AbortSignal.timeout(10000) // 增加到10秒超时
+          signal: AbortSignal.timeout(10000)
         });
-      } catch (fetchError) {
-        console.warn('wttr.in 请求超时或失败，尝试备用方案...');
-        // 如果 wttr.in 失败，可以尝试简单的文本接口作为备用
-        const backupResp = await fetch(`https://wttr.in/${latitude},${longitude}?format=3&lang=zh`, {
-          signal: AbortSignal.timeout(5000)
-        }).catch(() => null);
         
-        if (backupResp && backupResp.ok) {
-          const text = await backupResp.text();
-          // 备用格式返回的是类似 "Beijing: ☀️ +20°C" 的字符串
-          return {
-            temp: text.split(': ')[1]?.split(' ')[1] || '未知',
-            condition: text.split(': ')[1]?.split(' ')[0] || '未知',
-            city: text.split(': ')[0] || '未知地点',
-            tip: "愿你今天心情晴朗 ☀️"
-          };
+        // 检查内容类型，确保是 JSON
+        const contentType = response.headers.get('content-type');
+        if (!response.ok || !contentType || !contentType.includes('application/json')) {
+          throw new Error('wttr.in 未返回有效的 JSON 数据');
+        }
+      } catch (fetchError) {
+        console.warn('wttr.in JSON 请求失败，尝试备用方案...', fetchError);
+        // 如果 wttr.in 失败，可以尝试简单的文本接口作为备用
+        try {
+          const backupResp = await fetch(`https://wttr.in/${latitude},${longitude}?format=3&lang=zh`, {
+            signal: AbortSignal.timeout(5000)
+          });
+          
+          const contentType = backupResp.headers.get('content-type');
+          if (backupResp.ok && contentType && !contentType.includes('text/html')) {
+            const text = await backupResp.text();
+            // 备用格式返回的是类似 "Beijing: ☀️ +20°C" 的字符串
+            if (text && text.includes(':')) {
+              const parts = text.split(':');
+              const city = parts[0].trim();
+              const weatherPart = parts[1].trim();
+              const weatherParts = weatherPart.split(' ');
+              
+              return {
+                temp: weatherParts[weatherParts.length - 1] || '未知',
+                condition: weatherParts[0] || '未知',
+                city: city || '未知地点',
+                tip: "愿你今天心情晴朗 ☀️"
+              };
+            }
+          }
+        } catch (backupError) {
+          console.error('wttr.in 备用方案也失败了，尝试 Open-Meteo:', backupError);
+          try {
+            // 第三方备份：Open-Meteo (无需 API Key)
+            const omResp = await fetch(
+              `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`,
+              { signal: AbortSignal.timeout(5000) }
+            );
+            if (omResp.ok) {
+              const omData = await omResp.json();
+              if (omData.current_weather) {
+                const code = omData.current_weather.weathercode;
+                const weatherMap: Record<number, string> = {
+                  0: '晴朗', 1: '晴间多云', 2: '多云', 3: '阴天',
+                  45: '雾', 48: '雾',
+                  51: '毛毛雨', 53: '毛毛雨', 55: '毛毛雨',
+                  61: '小雨', 63: '中雨', 65: '大雨',
+                  71: '小雪', 73: '中雪', 75: '大雪',
+                  80: '阵雨', 81: '阵雨', 82: '阵雨',
+                  95: '雷阵雨', 96: '雷阵雨', 99: '雷阵雨'
+                };
+                return {
+                  temp: `${omData.current_weather.temperature}°C`,
+                  condition: weatherMap[code] || '未知',
+                  city: '当前位置',
+                  tip: "愿你今天心情晴朗 ☀️"
+                };
+              }
+            }
+          } catch (omError) {
+            console.error('Open-Meteo 也失败了:', omError);
+          }
         }
         throw fetchError;
-      }
-      
-      if (!response.ok) {
-        throw new Error(`天气接口响应失败: ${response.status}`);
       }
       
       const data = await response.json();

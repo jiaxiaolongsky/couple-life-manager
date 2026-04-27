@@ -416,6 +416,37 @@ export const dishCategoryService = {
 
 // 菜品服务
 export const dishService = {
+  // 上传菜品图片
+  async uploadDishImage(uri: string): Promise<string> {
+    try {
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+      const filePath = `dish-images/${fileName}`;
+
+      // 将本地 URI 转换为 Blob
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      const { data, error } = await supabase.storage
+        .from('dish-assets')
+        .upload(filePath, blob, {
+          contentType: 'image/jpeg',
+          upsert: true
+        });
+
+      if (error) throw error;
+
+      // 获取公共 URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('dish-assets')
+        .getPublicUrl(filePath);
+
+      return publicUrl;
+    } catch (error) {
+      console.error('上传图片失败:', error);
+      throw error;
+    }
+  },
+
   // 获取所有菜品
   async getDishes(): Promise<Dish[]> {
     try {
