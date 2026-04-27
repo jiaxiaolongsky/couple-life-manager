@@ -67,10 +67,7 @@
           "android": {
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
-            "buildToolsVersion": "35.0.0",
-            "extraMavenRepos": [
-              "../node_modules/@react-native-async-storage/async-storage/android/local_repo"
-            ]
+            "buildToolsVersion": "35.0.0"
           },
           "kotlinVersion": "1.9.24"
         }
