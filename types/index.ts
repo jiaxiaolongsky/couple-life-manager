@@ -1,23 +1,31 @@
 // 数据模型定义
 
+// 菜品类别
+export interface DishCategory {
+  id: string;
+  name: string;
+  order: number;
+}
+
 // 菜品类型
 export interface Dish {
   id: string;
   name: string;
-  category: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  categoryId: string;
   ingredients: string[];
   calories?: number;
   image?: string;
   favorite: boolean;
+  note?: string; // 备注
 }
 
 // 餐饮计划
 export interface MealPlan {
   id: string;
   date: string; // YYYY-MM-DD
-  breakfast?: Dish;
-  lunch?: Dish;
-  dinner?: Dish;
+  breakfast?: Dish[];
+  lunch?: Dish[];
+  dinner?: Dish[];
   snacks?: Dish[];
 }
 

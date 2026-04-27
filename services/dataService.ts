@@ -1,10 +1,173 @@
 // 数据服务层
 import { Anniversary, BillImport, Dish, Expense, InventoryItem, MealPlan, Moment, ShoppingItem } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from './supabaseClient';
+
+// 数据库初始化服务
+export const dbInitService = {
+  async testConnection() {
+    try {
+      const { data, error } = await supabase.from('dish_categories').select('count', { count: 'exact', head: true });
+      if (error) {
+        console.error('Supabase 连接测试失败:', error.message);
+        return false;
+      }
+      console.log('Supabase 连接成功');
+      return true;
+    } catch (e) {
+      console.error('Supabase 连接异常:', e);
+      return false;
+    }
+  },
+
+  async initializeDatabase() {
+    // 首先测试连接
+    const isConnected = await this.testConnection();
+    if (!isConnected) {
+      console.error('数据库无法连接，请检查 URL 和 Key 是否正确');
+    }
+
+    try {
+      const tables = [
+        {
+          name: 'dish_categories',
+          sql: `
+            create table if not exists dish_categories (
+              id text primary key,
+              name text not null,
+              "order" integer default 0,
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        },
+        {
+          name: 'dishes',
+          sql: `
+            create table if not exists dishes (
+              id text primary key,
+              name text not null,
+              category_id text references dish_categories(id),
+              ingredients text[],
+              calories numeric,
+              favorite boolean default false,
+              image text,
+              note text,
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        },
+        {
+          name: 'meal_plans',
+          sql: `
+            create table if not exists meal_plans (
+              id text primary key,
+              date date not null unique,
+              breakfast jsonb default '[]',
+              lunch jsonb default '[]',
+              dinner jsonb default '[]',
+              snacks jsonb default '[]',
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        },
+        {
+          name: 'expenses',
+          sql: `
+            create table if not exists expenses (
+              id text primary key,
+              date timestamp with time zone not null,
+              amount numeric not null,
+              category text,
+              description text,
+              payer text,
+              payment_method text,
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        },
+        {
+          name: 'shopping_list',
+          sql: `
+            create table if not exists shopping_list (
+              id text primary key,
+              name text not null,
+              category text,
+              quantity numeric default 1,
+              unit text,
+              purchased boolean default false,
+              priority text default 'medium',
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        },
+        {
+          name: 'inventory',
+          sql: `
+            create table if not exists inventory (
+              id text primary key,
+              name text not null,
+              category text,
+              current_stock numeric default 0,
+              min_stock numeric default 0,
+              unit text,
+              last_restocked timestamp with time zone,
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        },
+        {
+          name: 'anniversaries',
+          sql: `
+            create table if not exists anniversaries (
+              id text primary key,
+              title text not null,
+              date date not null,
+              type text,
+              remind_days integer default 0,
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        },
+        {
+          name: 'moments',
+          sql: `
+            create table if not exists moments (
+              id text primary key,
+              date timestamp with time zone not null,
+              content text,
+              images text[] default '{}',
+              location text,
+              created_at timestamp with time zone default timezone('utc'::text, now())
+            );
+          `
+        }
+      ];
+
+      for (const table of tables) {
+        await supabase.rpc('execute_sql', {
+          sql_query: `
+            ${table.sql}
+            alter table ${table.name} enable row level security;
+            do $$ begin
+              create policy "Allow all access" on ${table.name} for all using (true) with check (true);
+            exception when others then null; end $$;
+          `
+        }).catch(() => {
+          console.log(`Table ${table.name} sync check complete (manual creation might be needed if RPC is disabled)`);
+        });
+      }
+      
+      console.log('Database initialization complete');
+    } catch (error) {
+      console.error('Database initialization error:', error);
+    }
+  }
+};
 
 const STORAGE_KEYS = {
   DISHES: 'dishes',
   MEAL_PLANS: 'mealPlans',
+  DISH_CATEGORIES: 'dishCategories',
   EXPENSES: 'expenses',
   SHOPPING_LIST: 'shoppingList',
   INVENTORY: 'inventory',
@@ -36,24 +199,63 @@ export const billImportService = {
 export const anniversaryService = {
   async getAnniversaries(): Promise<Anniversary[]> {
     try {
+      const { data, error } = await supabase
+        .from('anniversaries')
+        .select('*')
+        .order('date', { ascending: true });
+      
+      if (error) throw error;
+      
+      if (data) {
+        await AsyncStorage.setItem(STORAGE_KEYS.ANNIVERSARIES, JSON.stringify(data));
+        return data as Anniversary[];
+      }
+      
       const json = await AsyncStorage.getItem(STORAGE_KEYS.ANNIVERSARIES);
       return json ? JSON.parse(json) : [];
     } catch (error) {
       console.error('获取纪念日失败:', error);
-      return [];
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.ANNIVERSARIES);
+      return json ? JSON.parse(json) : [];
     }
   },
 
   async addAnniversary(anniversary: Anniversary): Promise<void> {
-    const list = await this.getAnniversaries();
-    list.push(anniversary);
-    await AsyncStorage.setItem(STORAGE_KEYS.ANNIVERSARIES, JSON.stringify(list));
+    try {
+      const { error } = await supabase
+        .from('anniversaries')
+        .insert([{
+          id: anniversary.id,
+          title: anniversary.title,
+          date: anniversary.date,
+          type: anniversary.type,
+          remind_days: anniversary.remindDays
+        }]);
+      
+      if (error) throw error;
+      
+      const list = await this.getAnniversaries();
+      await AsyncStorage.setItem(STORAGE_KEYS.ANNIVERSARIES, JSON.stringify(list));
+    } catch (error) {
+      console.error('添加纪念日失败:', error);
+    }
   },
 
   async deleteAnniversary(id: string): Promise<void> {
-    const list = await this.getAnniversaries();
-    const filtered = list.filter(a => a.id !== id);
-    await AsyncStorage.setItem(STORAGE_KEYS.ANNIVERSARIES, JSON.stringify(filtered));
+    try {
+      const { error } = await supabase
+        .from('anniversaries')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      const list = await this.getAnniversaries();
+      const filtered = list.filter(a => a.id !== id);
+      await AsyncStorage.setItem(STORAGE_KEYS.ANNIVERSARIES, JSON.stringify(filtered));
+    } catch (error) {
+      console.error('删除纪念日失败:', error);
+    }
   }
 };
 
@@ -61,18 +263,133 @@ export const anniversaryService = {
 export const momentService = {
   async getMoments(): Promise<Moment[]> {
     try {
+      const { data, error } = await supabase
+        .from('moments')
+        .select('*')
+        .order('date', { ascending: false });
+      
+      if (error) throw error;
+      
+      if (data) {
+        await AsyncStorage.setItem(STORAGE_KEYS.MOMENTS, JSON.stringify(data));
+        return data as Moment[];
+      }
+      
       const json = await AsyncStorage.getItem(STORAGE_KEYS.MOMENTS);
       return json ? JSON.parse(json) : [];
     } catch (error) {
       console.error('获取点滴失败:', error);
-      return [];
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.MOMENTS);
+      return json ? JSON.parse(json) : [];
     }
   },
 
   async addMoment(moment: Moment): Promise<void> {
-    const list = await this.getMoments();
-    list.unshift(moment);
-    await AsyncStorage.setItem(STORAGE_KEYS.MOMENTS, JSON.stringify(list));
+    try {
+      const { error } = await supabase
+        .from('moments')
+        .insert([{
+          id: moment.id,
+          date: moment.date,
+          content: moment.content,
+          images: moment.images,
+          location: moment.location
+        }]);
+      
+      if (error) throw error;
+      
+      const list = await this.getMoments();
+      await AsyncStorage.setItem(STORAGE_KEYS.MOMENTS, JSON.stringify(list));
+    } catch (error) {
+      console.error('添加点滴失败:', error);
+    }
+  }
+};
+
+// 菜品类别服务
+export const dishCategoryService = {
+  async getCategories(): Promise<DishCategory[]> {
+    try {
+      const { data, error } = await supabase
+        .from('dish_categories')
+        .select('*')
+        .order('order', { ascending: true });
+      
+      if (error) throw error;
+      
+      if (data) {
+        await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(data));
+        return data as DishCategory[];
+      }
+      
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.DISH_CATEGORIES);
+      return json ? JSON.parse(json) : [];
+    } catch (error) {
+      console.error('获取菜品分类失败:', error);
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.DISH_CATEGORIES);
+      return json ? JSON.parse(json) : [];
+    }
+  },
+
+  async addCategory(category: DishCategory): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('dish_categories')
+        .insert([category]);
+      if (error) {
+        console.error('添加分类数据库报错:', error);
+        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+      }
+      const list = await this.getCategories();
+      await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(list));
+    } catch (error: any) {
+      console.error('添加分类失败:', error);
+      throw error;
+    }
+  },
+
+  async updateCategory(id: string, updates: Partial<DishCategory>): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('dish_categories')
+        .update(updates)
+        .eq('id', id);
+      if (error) {
+        console.error('更新分类数据库报错:', error);
+        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+      }
+      const list = await this.getCategories();
+      await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(list));
+    } catch (error: any) {
+      console.error('更新分类失败:', error);
+      throw error;
+    }
+  },
+
+  async deleteCategory(id: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('dish_categories')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      const list = await this.getCategories();
+      await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(list));
+    } catch (error) {
+      console.error('删除分类失败:', error);
+    }
+  },
+
+  async saveCategories(categories: DishCategory[]): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('dish_categories')
+        .upsert(categories);
+      if (error) throw error;
+      await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(categories));
+    } catch (error) {
+      console.error('保存分类失败:', error);
+    }
   }
 };
 
@@ -81,18 +398,55 @@ export const dishService = {
   // 获取所有菜品
   async getDishes(): Promise<Dish[]> {
     try {
+      // 优先从 Supabase 获取
+      const { data, error } = await supabase
+        .from('dishes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      if (data) {
+        // 同步到本地缓存
+        const dishes = data.map(d => ({
+          ...d,
+          categoryId: d.category_id, // 映射数据库字段名到 TS 属性名
+          note: d.note
+        }));
+        await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(dishes));
+        return dishes as Dish[];
+      }
+      
       const json = await AsyncStorage.getItem(STORAGE_KEYS.DISHES);
       return json ? JSON.parse(json) : [];
     } catch (error) {
-      console.error('获取菜品失败:', error);
-      return [];
+      console.error('获取菜品失败，尝试本地缓存:', error);
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.DISHES);
+      return json ? JSON.parse(json) : [];
     }
   },
 
-  // 保存菜品
+  // 保存菜品 (批量)
   async saveDishes(dishes: Dish[]): Promise<void> {
     try {
+      // 保存到本地
       await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(dishes));
+      
+      // 同步到 Supabase (upsert)
+      const { error } = await supabase
+        .from('dishes')
+        .upsert(dishes.map(d => ({
+          id: d.id,
+          name: d.name,
+          category_id: d.categoryId,
+          ingredients: d.ingredients,
+          calories: d.calories,
+          favorite: d.favorite,
+          image: d.image,
+          note: d.note
+        })));
+      
+      if (error) throw error;
     } catch (error) {
       console.error('保存菜品失败:', error);
     }
@@ -100,26 +454,82 @@ export const dishService = {
 
   // 添加菜品
   async addDish(dish: Dish): Promise<void> {
-    const dishes = await this.getDishes();
-    dishes.push(dish);
-    await this.saveDishes(dishes);
+    try {
+      // 1. 保存到 Supabase
+      const { error } = await supabase
+        .from('dishes')
+        .insert([{
+          id: dish.id,
+          name: dish.name,
+          category_id: dish.categoryId,
+          ingredients: dish.ingredients,
+          calories: dish.calories,
+          favorite: dish.favorite,
+          image: dish.image,
+          note: dish.note
+        }]);
+      
+      if (error) {
+        console.error('添加菜品数据库报错:', error);
+        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+      }
+      
+      // 2. 同步更新本地
+      const dishes = await this.getDishes();
+      await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(dishes));
+    } catch (error: any) {
+      console.error('添加菜品失败:', error);
+      throw error;
+    }
   },
 
   // 更新菜品
   async updateDish(id: string, updates: Partial<Dish>): Promise<void> {
-    const dishes = await this.getDishes();
-    const index = dishes.findIndex(d => d.id === id);
-    if (index !== -1) {
-      dishes[index] = { ...dishes[index], ...updates };
-      await this.saveDishes(dishes);
+    try {
+      const supabaseUpdates: any = { ...updates };
+      if (updates.categoryId) {
+        supabaseUpdates.category_id = updates.categoryId;
+        delete supabaseUpdates.categoryId;
+      }
+
+      // 1. 更新 Supabase
+      const { error } = await supabase
+        .from('dishes')
+        .update(supabaseUpdates)
+        .eq('id', id);
+      
+      if (error) {
+        console.error('更新菜品数据库报错:', error);
+        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+      }
+      
+      // 2. 同步更新本地
+      const dishes = await this.getDishes();
+      await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(dishes));
+    } catch (error: any) {
+      console.error('更新菜品失败:', error);
+      throw error;
     }
   },
 
   // 删除菜品
   async deleteDish(id: string): Promise<void> {
-    const dishes = await this.getDishes();
-    const filtered = dishes.filter(d => d.id !== id);
-    await this.saveDishes(filtered);
+    try {
+      // 1. 从 Supabase 删除
+      const { error } = await supabase
+        .from('dishes')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      // 2. 同步更新本地
+      const dishes = await this.getDishes();
+      const filtered = dishes.filter(d => d.id !== id);
+      await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(filtered));
+    } catch (error) {
+      console.error('删除菜品失败:', error);
+    }
   },
 };
 
@@ -128,11 +538,23 @@ export const mealPlanService = {
   // 获取餐饮计划
   async getMealPlans(): Promise<MealPlan[]> {
     try {
+      const { data, error } = await supabase
+        .from('meal_plans')
+        .select('*');
+      
+      if (error) throw error;
+      
+      if (data) {
+        await AsyncStorage.setItem(STORAGE_KEYS.MEAL_PLANS, JSON.stringify(data));
+        return data as MealPlan[];
+      }
+      
       const json = await AsyncStorage.getItem(STORAGE_KEYS.MEAL_PLANS);
       return json ? JSON.parse(json) : [];
     } catch (error) {
       console.error('获取餐饮计划失败:', error);
-      return [];
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.MEAL_PLANS);
+      return json ? JSON.parse(json) : [];
     }
   },
 
@@ -140,6 +562,12 @@ export const mealPlanService = {
   async saveMealPlans(plans: MealPlan[]): Promise<void> {
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.MEAL_PLANS, JSON.stringify(plans));
+      
+      const { error } = await supabase
+        .from('meal_plans')
+        .upsert(plans);
+      
+      if (error) throw error;
     } catch (error) {
       console.error('保存餐饮计划失败:', error);
     }
@@ -147,22 +575,53 @@ export const mealPlanService = {
 
   // 获取某天的餐饮计划
   async getMealPlanByDate(date: string): Promise<MealPlan | null> {
-    const plans = await this.getMealPlans();
-    return plans.find(p => p.date === date) || null;
+    try {
+      const { data, error } = await supabase
+        .from('meal_plans')
+        .select('*')
+        .eq('date', date)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') throw error; // PGRST116 是未找到记录
+      
+      if (data) return data as MealPlan;
+      
+      const plans = await this.getMealPlans();
+      return plans.find(p => p.date === date) || null;
+    } catch (error) {
+      console.error('获取单日计划失败:', error);
+      return null;
+    }
   },
 
   // 更新或创建餐饮计划
   async upsertMealPlan(plan: MealPlan): Promise<void> {
-    const plans = await this.getMealPlans();
-    const index = plans.findIndex(p => p.date === plan.date);
-    
-    if (index !== -1) {
-      plans[index] = plan;
-    } else {
-      plans.push(plan);
+    try {
+      const { error } = await supabase
+        .from('meal_plans')
+        .upsert({
+          id: plan.id,
+          date: plan.date,
+          breakfast: plan.breakfast,
+          lunch: plan.lunch,
+          dinner: plan.dinner,
+          snacks: plan.snacks
+        });
+      
+      if (error) throw error;
+      
+      // 同步本地
+      const plans = await this.getMealPlans();
+      const index = plans.findIndex(p => p.date === plan.date);
+      if (index !== -1) {
+        plans[index] = plan;
+      } else {
+        plans.push(plan);
+      }
+      await AsyncStorage.setItem(STORAGE_KEYS.MEAL_PLANS, JSON.stringify(plans));
+    } catch (error) {
+      console.error('更新计划失败:', error);
     }
-    
-    await this.saveMealPlans(plans);
   },
 
   // 获取本周餐饮计划
@@ -184,18 +643,47 @@ export const expenseService = {
   // 获取所有消费记录
   async getExpenses(): Promise<Expense[]> {
     try {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .order('date', { ascending: false });
+      
+      if (error) throw error;
+      
+      if (data) {
+        await AsyncStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data));
+        return data.map(d => ({
+          ...d,
+          paymentMethod: d.payment_method
+        })) as Expense[];
+      }
+      
       const json = await AsyncStorage.getItem(STORAGE_KEYS.EXPENSES);
       return json ? JSON.parse(json) : [];
     } catch (error) {
       console.error('获取消费记录失败:', error);
-      return [];
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.EXPENSES);
+      return json ? JSON.parse(json) : [];
     }
   },
 
-  // 保存消费记录
+  // 保存消费记录 (批量)
   async saveExpenses(expenses: Expense[]): Promise<void> {
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+      const { error } = await supabase
+        .from('expenses')
+        .upsert(expenses.map(e => ({
+          id: e.id,
+          date: e.date,
+          amount: e.amount,
+          category: e.category,
+          description: e.description,
+          payer: e.payer,
+          payment_method: e.paymentMethod
+        })));
+      
+      if (error) throw error;
     } catch (error) {
       console.error('保存消费记录失败:', error);
     }
@@ -203,9 +691,26 @@ export const expenseService = {
 
   // 添加消费记录
   async addExpense(expense: Expense): Promise<void> {
-    const expenses = await this.getExpenses();
-    expenses.push(expense);
-    await this.saveExpenses(expenses);
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .insert([{
+          id: expense.id,
+          date: expense.date,
+          amount: expense.amount,
+          category: expense.category,
+          description: expense.description,
+          payer: expense.payer,
+          payment_method: expense.paymentMethod
+        }]);
+      
+      if (error) throw error;
+      
+      const expenses = await this.getExpenses();
+      await AsyncStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+    } catch (error) {
+      console.error('添加消费记录失败:', error);
+    }
   },
 
   // 获取本月消费
@@ -247,18 +752,36 @@ export const shoppingService = {
   // 获取购物清单
   async getShoppingList(): Promise<ShoppingItem[]> {
     try {
+      const { data, error } = await supabase
+        .from('shopping_list')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      
+      if (data) {
+        await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(data));
+        return data as ShoppingItem[];
+      }
+      
       const json = await AsyncStorage.getItem(STORAGE_KEYS.SHOPPING_LIST);
       return json ? JSON.parse(json) : [];
     } catch (error) {
       console.error('获取购物清单失败:', error);
-      return [];
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.SHOPPING_LIST);
+      return json ? JSON.parse(json) : [];
     }
   },
 
-  // 保存购物清单
+  // 保存购物清单 (批量)
   async saveShoppingList(items: ShoppingItem[]): Promise<void> {
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
+      const { error } = await supabase
+        .from('shopping_list')
+        .upsert(items);
+      
+      if (error) throw error;
     } catch (error) {
       console.error('保存购物清单失败:', error);
     }
@@ -266,26 +789,52 @@ export const shoppingService = {
 
   // 添加购物项
   async addShoppingItem(item: ShoppingItem): Promise<void> {
-    const items = await this.getShoppingList();
-    items.push(item);
-    await this.saveShoppingList(items);
+    try {
+      const { error } = await supabase
+        .from('shopping_list')
+        .insert([item]);
+      
+      if (error) throw error;
+      
+      const items = await this.getShoppingList();
+      await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
+    } catch (error) {
+      console.error('添加购物项失败:', error);
+    }
   },
 
   // 更新购物项
   async updateShoppingItem(id: string, updates: Partial<ShoppingItem>): Promise<void> {
-    const items = await this.getShoppingList();
-    const index = items.findIndex(item => item.id === id);
-    if (index !== -1) {
-      items[index] = { ...items[index], ...updates };
-      await this.saveShoppingList(items);
+    try {
+      const { error } = await supabase
+        .from('shopping_list')
+        .update(updates)
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      const items = await this.getShoppingList();
+      await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
+    } catch (error) {
+      console.error('更新购物项失败:', error);
     }
   },
 
   // 删除购物项
   async deleteShoppingItem(id: string): Promise<void> {
-    const items = await this.getShoppingList();
-    const filtered = items.filter(item => item.id !== id);
-    await this.saveShoppingList(items);
+    try {
+      const { error } = await supabase
+        .from('shopping_list')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      const items = await this.getShoppingList();
+      await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
+    } catch (error) {
+      console.error('删除购物项失败:', error);
+    }
   },
 
   // 获取未购买的物品
@@ -306,18 +855,50 @@ export const inventoryService = {
   // 获取库存物品
   async getInventory(): Promise<InventoryItem[]> {
     try {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('*')
+        .order('name', { ascending: true });
+      
+      if (error) throw error;
+      
+      if (data) {
+        const mappedData = data.map(d => ({
+          ...d,
+          currentStock: d.current_stock,
+          minStock: d.min_stock,
+          lastRestocked: d.last_restocked
+        }));
+        await AsyncStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(mappedData));
+        return mappedData as InventoryItem[];
+      }
+      
       const json = await AsyncStorage.getItem(STORAGE_KEYS.INVENTORY);
       return json ? JSON.parse(json) : [];
     } catch (error) {
       console.error('获取库存失败:', error);
-      return [];
+      const json = await AsyncStorage.getItem(STORAGE_KEYS.INVENTORY);
+      return json ? JSON.parse(json) : [];
     }
   },
 
-  // 保存库存
+  // 保存库存 (批量)
   async saveInventory(items: InventoryItem[]): Promise<void> {
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(items));
+      const { error } = await supabase
+        .from('inventory')
+        .upsert(items.map(item => ({
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          current_stock: item.currentStock,
+          min_stock: item.minStock,
+          unit: item.unit,
+          last_restocked: item.lastRestocked
+        })));
+      
+      if (error) throw error;
     } catch (error) {
       console.error('保存库存失败:', error);
     }
@@ -325,34 +906,78 @@ export const inventoryService = {
 
   // 添加库存物品
   async addInventoryItem(item: InventoryItem): Promise<void> {
-    const items = await this.getInventory();
-    items.push(item);
-    await this.saveInventory(items);
+    try {
+      const { error } = await supabase
+        .from('inventory')
+        .insert([{
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          current_stock: item.currentStock,
+          min_stock: item.minStock,
+          unit: item.unit,
+          last_restocked: item.lastRestocked
+        }]);
+      
+      if (error) throw error;
+      
+      const items = await this.getInventory();
+      await AsyncStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(items));
+    } catch (error) {
+      console.error('添加库存物品失败:', error);
+    }
   },
 
   // 更新库存物品
   async updateInventoryItem(id: string, updates: Partial<InventoryItem>): Promise<void> {
-    const items = await this.getInventory();
-    const index = items.findIndex(item => item.id === id);
-    if (index !== -1) {
-      items[index] = { ...items[index], ...updates };
-      if (updates.currentStock !== undefined) {
-        items[index].lastRestocked = new Date().toISOString().split('T')[0];
-      }
-      await this.saveInventory(items);
+    try {
+      const supabaseUpdates: any = { ...updates };
+      if (updates.currentStock !== undefined) supabaseUpdates.current_stock = updates.currentStock;
+      if (updates.minStock !== undefined) supabaseUpdates.min_stock = updates.minStock;
+      if (updates.lastRestocked !== undefined) supabaseUpdates.last_restocked = updates.lastRestocked;
+      
+      // 删除不再需要的字段
+      delete supabaseUpdates.currentStock;
+      delete supabaseUpdates.minStock;
+
+      const { error } = await supabase
+        .from('inventory')
+        .update(supabaseUpdates)
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      const items = await this.getInventory();
+      await AsyncStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(items));
+    } catch (error) {
+      console.error('更新库存物品失败:', error);
     }
   },
 
   // 更新库存数量
   async updateStock(id: string, newStock: number): Promise<void> {
-    await this.updateInventoryItem(id, { currentStock: newStock });
+    await this.updateInventoryItem(id, { 
+      currentStock: newStock,
+      lastRestocked: new Date().toISOString()
+    });
   },
 
   // 删除库存物品
   async deleteInventoryItem(id: string): Promise<void> {
-    const items = await this.getInventory();
-    const filtered = items.filter(item => item.id !== id);
-    await this.saveInventory(filtered);
+    try {
+      const { error } = await supabase
+        .from('inventory')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      const items = await this.getInventory();
+      const filtered = items.filter(item => item.id !== id);
+      await AsyncStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(filtered));
+    } catch (error) {
+      console.error('删除库存物品失败:', error);
+    }
   },
 
   // 获取需要补货的物品
@@ -360,133 +985,4 @@ export const inventoryService = {
     const items = await this.getInventory();
     return items.filter(item => item.currentStock <= item.minStock);
   },
-};
-
-// 初始化示例数据
-export const initializeSampleData = async (): Promise<void> => {
-  // 检查是否已初始化
-  const initialized = await AsyncStorage.getItem('app_initialized');
-  if (initialized === 'true') return;
-
-  // 立即标记为已初始化，防止重复执行
-  await AsyncStorage.setItem('app_initialized', 'true');
-
-  // 示例菜品
-  const sampleDishes: Dish[] = [
-    {
-      id: '1',
-      name: '煎蛋三明治',
-      category: '早餐',
-      ingredients: ['鸡蛋', '面包', '黄油', '生菜'],
-      calories: 350,
-      favorite: true,
-    },
-    {
-      id: '2',
-      name: '番茄炒蛋',
-      category: '午餐',
-      ingredients: ['番茄', '鸡蛋', '葱'],
-      calories: 280,
-      favorite: true,
-    },
-    {
-      id: '3',
-      name: '红烧肉',
-      category: '晚餐',
-      ingredients: ['五花肉', '姜', '葱', '冰糖', '酱油'],
-      calories: 450,
-      favorite: false,
-    },
-    {
-      id: '4',
-      name: '零食',
-      category: '加餐',
-      ingredients: ['苹果', '香蕉', '葡萄', '酸奶'],
-      calories: 150,
-      favorite: true,
-    },
-  ];
-
-  // 示例消费记录
-  const sampleExpenses: Expense[] = [
-    {
-      id: '1',
-      date: new Date().toISOString().split('T')[0],
-      amount: 50,
-      category: '餐饮',
-      description: '午餐',
-      payer: 'me',
-      paymentMethod: 'wechat',
-    },
-    {
-      id: '2',
-      date: new Date().toISOString().split('T')[0],
-      amount: 200,
-      category: '购物',
-      description: '超市买菜',
-      payer: 'partner',
-      paymentMethod: 'alipay',
-    },
-  ];
-
-  // 示例购物清单
-  const sampleShopping: ShoppingItem[] = [
-    {
-      id: '1',
-      name: '牛奶',
-      category: '日用品',
-      quantity: 2,
-      unit: '瓶',
-      purchased: false,
-      priority: 'high',
-    },
-    {
-      id: '2',
-      name: '生菜',
-      category: '蔬菜',
-      quantity: 1,
-      unit: '把',
-      purchased: true,
-      priority: 'medium',
-    },
-  ];
-
-  // 示例库存
-  const sampleInventory: InventoryItem[] = [
-    {
-      id: '1',
-      name: '大米',
-      category: '食品',
-      currentStock: 2,
-      minStock: 5,
-      unit: 'kg',
-      lastRestocked: '2024-03-20',
-    },
-    {
-      id: '2',
-      name: '洗衣液',
-      category: '日用品',
-      currentStock: 1,
-      minStock: 1,
-      unit: '瓶',
-      lastRestocked: '2024-03-15',
-    },
-  ];
-
-  // 示例纪念日
-  const sampleAnniversaries: Anniversary[] = [
-    {
-      id: '1',
-      title: '我们在一起',
-      date: '2023-05-20',
-      type: 'first_meet',
-      remindDays: 3,
-    },
-  ];
-
-  await dishService.saveDishes(sampleDishes);
-  await expenseService.saveExpenses(sampleExpenses);
-  await shoppingService.saveShoppingList(sampleShopping);
-  await inventoryService.saveInventory(sampleInventory);
-  await anniversaryService.addAnniversary(sampleAnniversaries[0]);
 };

@@ -1,6 +1,6 @@
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { anniversaryService, expenseService, initializeSampleData, inventoryService, mealPlanService, shoppingService } from '@/services/dataService';
+import { anniversaryService, expenseService, inventoryService, mealPlanService, shoppingService } from '@/services/dataService';
 import { WeatherData, weatherService } from '@/services/weatherService';
 import { useRouter } from 'expo-router';
 import { AlertTriangle, Camera, ChevronRight, CloudSun, Heart, Plus, ShoppingBag, TrendingUp, Utensils, Wallet } from 'lucide-react-native';
@@ -43,7 +43,10 @@ export default function HomeScreen() {
     try {
       setLoading(true);
       setWeatherLoading(true);
-      await initializeSampleData();
+      
+      // 初始化数据库表
+      const { dbInitService } = require('@/services/dataService');
+      await dbInitService.initializeDatabase();
       
       const total = await expenseService.getTotalExpenses();
       setTotalExpenses(total);
@@ -187,15 +190,27 @@ export default function HomeScreen() {
               <View>
                 <View style={styles.mealRow}>
                   <Text style={[styles.mealTime, { color: theme.icon }]}>早餐</Text>
-                  <Text style={[styles.mealName, { color: theme.text }]}>{todayMeal.breakfast?.name || '未安排'}</Text>
+                  <Text style={[styles.mealName, { color: theme.text }]} numberOfLines={1}>
+                    {todayMeal.breakfast && todayMeal.breakfast.length > 0 
+                      ? todayMeal.breakfast.map((d: any) => d.name).join('、') 
+                      : '未安排'}
+                  </Text>
                 </View>
                 <View style={styles.mealRow}>
                   <Text style={[styles.mealTime, { color: theme.icon }]}>午餐</Text>
-                  <Text style={[styles.mealName, { color: theme.text }]}>{todayMeal.lunch?.name || '未安排'}</Text>
+                  <Text style={[styles.mealName, { color: theme.text }]} numberOfLines={1}>
+                    {todayMeal.lunch && todayMeal.lunch.length > 0 
+                      ? todayMeal.lunch.map((d: any) => d.name).join('、') 
+                      : '未安排'}
+                  </Text>
                 </View>
                 <View style={styles.mealRow}>
                   <Text style={[styles.mealTime, { color: theme.icon }]}>晚餐</Text>
-                  <Text style={[styles.mealName, { color: theme.text }]}>{todayMeal.dinner?.name || '未安排'}</Text>
+                  <Text style={[styles.mealName, { color: theme.text }]} numberOfLines={1}>
+                    {todayMeal.dinner && todayMeal.dinner.length > 0 
+                      ? todayMeal.dinner.map((d: any) => d.name).join('、') 
+                      : '未安排'}
+                  </Text>
                 </View>
               </View>
             ) : (
