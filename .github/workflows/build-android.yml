@@ -23,25 +23,24 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
       - name: Install dependencies
-        run: |
-          npm install
-          npx expo install --fix
+        run: npm ci
 
-      - name: Prebuild Android
-        run: npx expo prebuild --platform android --no-install
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-cache: true
+          token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build JavaScript Bundle
-        run: npx expo export --platform android
-
-      - name: Build with Gradle
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+      - name: Build Android
+        run: eas build --platform android --profile production --local --non-interactive --output=./app-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: ./app-release.apk
