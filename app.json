@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.coupleapp.lifemanager"
+      "bundleIdentifier": "com.coupleapp.lifemanager",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "我们需要您的位置信息来提供当地天气预报。"
+      }
     },
     "android": {
       "package": "com.coupleapp.lifemanager",
@@ -25,7 +28,8 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "INTERNET"
       ]
     },
     "web": {

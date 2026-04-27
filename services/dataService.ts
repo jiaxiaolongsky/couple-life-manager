@@ -3,16 +3,27 @@ import { Anniversary, BillImport, Dish, Expense, InventoryItem, MealPlan, Moment
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabaseClient';
 
+// 生成唯一 ID
+const generateId = () => {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+};
+
 // 数据库初始化服务
 export const dbInitService = {
   async testConnection() {
     try {
-      const { data, error } = await supabase.from('dish_categories').select('count', { count: 'exact', head: true });
-      if (error) {
-        console.error('Supabase 连接测试失败:', error.message);
-        return false;
+      // 测试几个核心表
+      const tables = ['dish_categories', 'dishes', 'meal_plans'];
+      for (const table of tables) {
+        const { error } = await supabase.from(table).select('count', { count: 'exact', head: true });
+        if (error) {
+          console.warn(`表 ${table} 测试失败:`, error.message);
+          // 如果是 404，说明表不存在
+          if (error.code === 'PGRST116' || error.status === 404) {
+            console.error(`表 ${table} 不存在，请确保已在 Supabase 中创建该表。`);
+          }
+        }
       }
-      console.log('Supabase 连接成功');
       return true;
     } catch (e) {
       console.error('Supabase 连接异常:', e);
@@ -33,7 +44,7 @@ export const dbInitService = {
           name: 'dish_categories',
           sql: `
             create table if not exists dish_categories (
-              id text primary key,
+              id text primary key default gen_random_uuid(),
               name text not null,
               "order" integer default 0,
               created_at timestamp with time zone default timezone('utc'::text, now())
@@ -44,7 +55,7 @@ export const dbInitService = {
           name: 'dishes',
           sql: `
             create table if not exists dishes (
-              id text primary key,
+              id text primary key default gen_random_uuid(),
               name text not null,
               category_id text references dish_categories(id),
               ingredients text[],
@@ -60,7 +71,7 @@ export const dbInitService = {
           name: 'meal_plans',
           sql: `
             create table if not exists meal_plans (
-              id text primary key,
+              id text primary key default gen_random_uuid(),
               date date not null unique,
               breakfast jsonb default '[]',
               lunch jsonb default '[]',
@@ -152,8 +163,10 @@ export const dbInitService = {
               create policy "Allow all access" on ${table.name} for all using (true) with check (true);
             exception when others then null; end $$;
           `
-        }).catch(() => {
-          console.log(`Table ${table.name} sync check complete (manual creation might be needed if RPC is disabled)`);
+        }).catch((e) => {
+          console.log(`Table ${table.name} sync check complete. 如果保存失败，请在 Supabase SQL Editor 中运行以下命令以开启访问权限：`);
+          console.log(`ALTER TABLE ${table.name} ENABLE ROW LEVEL SECURITY;`);
+          console.log(`CREATE POLICY "Allow all access" ON ${table.name} FOR ALL USING (true) WITH CHECK (true);`);
         });
       }
       
@@ -225,7 +238,7 @@ export const anniversaryService = {
       const { error } = await supabase
         .from('anniversaries')
         .insert([{
-          id: anniversary.id,
+          id: anniversary.id || generateId(),
           title: anniversary.title,
           date: anniversary.date,
           type: anniversary.type,
@@ -289,7 +302,7 @@ export const momentService = {
       const { error } = await supabase
         .from('moments')
         .insert([{
-          id: moment.id,
+          id: moment.id || generateId(),
           date: moment.date,
           content: moment.content,
           images: moment.images,
@@ -372,11 +385,15 @@ export const dishCategoryService = {
         .from('dish_categories')
         .delete()
         .eq('id', id);
-      if (error) throw error;
+      if (error) {
+        console.error('删除分类数据库报错:', error);
+        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+      }
       const list = await this.getCategories();
       await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(list));
-    } catch (error) {
+    } catch (error: any) {
       console.error('删除分类失败:', error);
+      throw error;
     }
   },
 
@@ -385,10 +402,14 @@ export const dishCategoryService = {
       const { error } = await supabase
         .from('dish_categories')
         .upsert(categories);
-      if (error) throw error;
+      if (error) {
+        console.error('保存分类数据库报错:', error);
+        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+      }
       await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(categories));
-    } catch (error) {
+    } catch (error: any) {
       console.error('保存分类失败:', error);
+      throw error;
     }
   }
 };
@@ -436,7 +457,7 @@ export const dishService = {
       const { error } = await supabase
         .from('dishes')
         .upsert(dishes.map(d => ({
-          id: d.id,
+          id: d.id || generateId(),
           name: d.name,
           category_id: d.categoryId,
           ingredients: d.ingredients,
@@ -456,18 +477,20 @@ export const dishService = {
   async addDish(dish: Dish): Promise<void> {
     try {
       // 1. 保存到 Supabase
+      const insertData: any = {
+        id: dish.id || generateId(),
+        name: dish.name,
+        category_id: dish.categoryId,
+        ingredients: dish.ingredients,
+        calories: dish.calories,
+        favorite: dish.favorite,
+        image: dish.image,
+        note: dish.note
+      };
+
       const { error } = await supabase
         .from('dishes')
-        .insert([{
-          id: dish.id,
-          name: dish.name,
-          category_id: dish.categoryId,
-          ingredients: dish.ingredients,
-          calories: dish.calories,
-          favorite: dish.favorite,
-          image: dish.image,
-          note: dish.note
-        }]);
+        .insert([insertData]);
       
       if (error) {
         console.error('添加菜品数据库报错:', error);
@@ -521,14 +544,18 @@ export const dishService = {
         .delete()
         .eq('id', id);
       
-      if (error) throw error;
+      if (error) {
+        console.error('删除菜品数据库报错:', error);
+        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+      }
       
       // 2. 同步更新本地
       const dishes = await this.getDishes();
       const filtered = dishes.filter(d => d.id !== id);
       await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(filtered));
-    } catch (error) {
+    } catch (error: any) {
       console.error('删除菜品失败:', error);
+      throw error;
     }
   },
 };
@@ -576,15 +603,17 @@ export const mealPlanService = {
   // 获取某天的餐饮计划
   async getMealPlanByDate(date: string): Promise<MealPlan | null> {
     try {
-      const { data, error } = await supabase
+      const { data, error, status } = await supabase
         .from('meal_plans')
         .select('*')
         .eq('date', date)
         .single();
       
-      if (error && error.code !== 'PGRST116') throw error; // PGRST116 是未找到记录
-      
-      if (data) return data as MealPlan;
+      if (error) {
+        if (error.code === 'PGRST116') return null; // 未找到记录
+        console.error(`获取单日计划失败 (状态码: ${status}):`, error);
+        throw error;
+      }
       
       const plans = await this.getMealPlans();
       return plans.find(p => p.date === date) || null;
@@ -597,16 +626,18 @@ export const mealPlanService = {
   // 更新或创建餐饮计划
   async upsertMealPlan(plan: MealPlan): Promise<void> {
     try {
+      const upsertData: any = {
+        id: plan.id || generateId(),
+        date: plan.date,
+        breakfast: plan.breakfast,
+        lunch: plan.lunch,
+        dinner: plan.dinner,
+        snacks: plan.snacks
+      };
+
       const { error } = await supabase
         .from('meal_plans')
-        .upsert({
-          id: plan.id,
-          date: plan.date,
-          breakfast: plan.breakfast,
-          lunch: plan.lunch,
-          dinner: plan.dinner,
-          snacks: plan.snacks
-        });
+        .upsert(upsertData);
       
       if (error) throw error;
       
@@ -674,7 +705,7 @@ export const expenseService = {
       const { error } = await supabase
         .from('expenses')
         .upsert(expenses.map(e => ({
-          id: e.id,
+          id: e.id || generateId(),
           date: e.date,
           amount: e.amount,
           category: e.category,
@@ -695,7 +726,7 @@ export const expenseService = {
       const { error } = await supabase
         .from('expenses')
         .insert([{
-          id: expense.id,
+          id: expense.id || generateId(),
           date: expense.date,
           amount: expense.amount,
           category: expense.category,
@@ -792,7 +823,10 @@ export const shoppingService = {
     try {
       const { error } = await supabase
         .from('shopping_list')
-        .insert([item]);
+        .insert([{
+          ...item,
+          id: item.id || generateId()
+        }]);
       
       if (error) throw error;
       
@@ -889,7 +923,7 @@ export const inventoryService = {
       const { error } = await supabase
         .from('inventory')
         .upsert(items.map(item => ({
-          id: item.id,
+          id: item.id || generateId(),
           name: item.name,
           category: item.category,
           current_stock: item.currentStock,
@@ -910,7 +944,7 @@ export const inventoryService = {
       const { error } = await supabase
         .from('inventory')
         .insert([{
-          id: item.id,
+          id: item.id || generateId(),
           name: item.name,
           category: item.category,
           current_stock: item.currentStock,

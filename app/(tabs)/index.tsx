@@ -45,8 +45,12 @@ export default function HomeScreen() {
       setWeatherLoading(true);
       
       // 初始化数据库表
-      const { dbInitService } = require('@/services/dataService');
-      await dbInitService.initializeDatabase();
+      try {
+        const { dbInitService } = require('@/services/dataService');
+        await dbInitService.initializeDatabase();
+      } catch (dbInitError) {
+        console.error('数据库初始化尝试失败:', dbInitError);
+      }
       
       const total = await expenseService.getTotalExpenses();
       setTotalExpenses(total);
@@ -69,7 +73,11 @@ export default function HomeScreen() {
       // 加载天气
       try {
         const weatherData = await weatherService.getCurrentWeather();
-        setWeather(weatherData);
+        if (weatherData) {
+          setWeather(weatherData);
+        } else {
+          console.warn('Weather service returned null');
+        }
       } catch (e) {
         console.error('Weather fetch error in component:', e);
       } finally {
@@ -139,20 +147,20 @@ export default function HomeScreen() {
             </Card.Content>
           </Card>
         ) : (
-          <Card style={[styles.weatherCard, { backgroundColor: theme.card }]}>
-            <Card.Content style={styles.weatherContent}>
-              <View style={styles.weatherMain}>
-                <CloudSun size={32} color={theme.icon} />
-                <View style={{ marginLeft: 12 }}>
-                  <Text style={[styles.weatherTemp, { color: theme.text }]}>天气不可用</Text>
-                  <Text style={[styles.weatherCity, { color: theme.icon }]}>点击重试</Text>
+          <TouchableOpacity onPress={loadData} activeOpacity={0.7}>
+            <Card style={[styles.weatherCard, { backgroundColor: theme.card }]}>
+              <Card.Content style={styles.weatherContent}>
+                <View style={styles.weatherMain}>
+                  <CloudSun size={32} color={theme.icon} />
+                  <View style={{ marginLeft: 12 }}>
+                    <Text style={[styles.weatherTemp, { color: theme.text }]}>天气不可用</Text>
+                    <Text style={[styles.weatherCity, { color: theme.icon }]}>点击重试</Text>
+                  </View>
                 </View>
-              </View>
-              <TouchableOpacity onPress={loadData} style={{ padding: 8 }}>
                 <TrendingUp size={20} color={theme.primary} />
-              </TouchableOpacity>
-            </Card.Content>
-          </Card>
+              </Card.Content>
+            </Card>
+          </TouchableOpacity>
         )}
 
         {/* Stats Summary */}
@@ -209,6 +217,14 @@ export default function HomeScreen() {
                   <Text style={[styles.mealName, { color: theme.text }]} numberOfLines={1}>
                     {todayMeal.dinner && todayMeal.dinner.length > 0 
                       ? todayMeal.dinner.map((d: any) => d.name).join('、') 
+                      : '未安排'}
+                  </Text>
+                </View>
+                <View style={styles.mealRow}>
+                  <Text style={[styles.mealTime, { color: theme.icon }]}>加餐</Text>
+                  <Text style={[styles.mealName, { color: theme.text }]} numberOfLines={1}>
+                    {todayMeal.snacks && todayMeal.snacks.length > 0 
+                      ? todayMeal.snacks.map((d: any) => d.name).join('、') 
                       : '未安排'}
                   </Text>
                 </View>

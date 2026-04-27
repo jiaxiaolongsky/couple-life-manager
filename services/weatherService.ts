@@ -47,12 +47,23 @@ export const weatherService = {
         // 2. 获取位置
         console.log('正在获取当前位置...');
         try {
-          const location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          latitude = location.coords.latitude;
-          longitude = location.coords.longitude;
-          console.log('当前经纬度:', latitude, longitude);
+          // 增加超时控制，防止在某些设备上永久卡住
+          const location = await Promise.race([
+            Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            }),
+            new Promise<null>((_, reject) => 
+              setTimeout(() => reject(new Error('获取位置超时')), 10000)
+            )
+          ]);
+
+          if (location && 'coords' in location) {
+            latitude = location.coords.latitude;
+            longitude = location.coords.longitude;
+            console.log('当前经纬度:', latitude, longitude);
+          } else {
+            throw new Error('位置数据无效');
+          }
         } catch (locError) {
           console.error('获取位置失败，使用默认位置:', locError);
           latitude = 39.9042;
@@ -62,9 +73,31 @@ export const weatherService = {
 
       // 3. 调用天气 API
       console.log(`正在请求天气数据: https://wttr.in/${latitude},${longitude}?format=j1&lang=zh`);
-      const response = await fetch(`https://wttr.in/${latitude},${longitude}?format=j1&lang=zh`, {
-        signal: AbortSignal.timeout(8000) // 增加到8秒超时
-      });
+      
+      let response;
+      try {
+        response = await fetch(`https://wttr.in/${latitude},${longitude}?format=j1&lang=zh`, {
+          signal: AbortSignal.timeout(10000) // 增加到10秒超时
+        });
+      } catch (fetchError) {
+        console.warn('wttr.in 请求超时或失败，尝试备用方案...');
+        // 如果 wttr.in 失败，可以尝试简单的文本接口作为备用
+        const backupResp = await fetch(`https://wttr.in/${latitude},${longitude}?format=3&lang=zh`, {
+          signal: AbortSignal.timeout(5000)
+        }).catch(() => null);
+        
+        if (backupResp && backupResp.ok) {
+          const text = await backupResp.text();
+          // 备用格式返回的是类似 "Beijing: ☀️ +20°C" 的字符串
+          return {
+            temp: text.split(': ')[1]?.split(' ')[1] || '未知',
+            condition: text.split(': ')[1]?.split(' ')[0] || '未知',
+            city: text.split(': ')[0] || '未知地点',
+            tip: "愿你今天心情晴朗 ☀️"
+          };
+        }
+        throw fetchError;
+      }
       
       if (!response.ok) {
         throw new Error(`天气接口响应失败: ${response.status}`);

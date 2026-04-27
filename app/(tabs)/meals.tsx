@@ -1,24 +1,34 @@
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { dishCategoryService, dishService } from '@/services/dataService';
-import { Dish, DishCategory } from '@/types';
-import { ChevronDown, ChevronUp, Edit2, GripVertical, Heart, Plus, Trash2, Utensils } from 'lucide-react-native';
+import { dishCategoryService, dishService, mealPlanService } from '@/services/dataService';
+import { Dish, DishCategory, MealPlan } from '@/types';
+import { addDays, format, subDays } from 'date-fns';
+import { zhCN } from 'date-fns/locale';
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Coffee, Cookie, Edit2, GripVertical, Heart, Moon, Plus, Sun, Trash2, Utensils } from 'lucide-react-native';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import 'react-native-gesture-handler';
-import { Button, Card, Chip, FAB, IconButton, Searchbar, TextInput } from 'react-native-paper';
+import { Button, Card, Chip, FAB, IconButton, Searchbar, SegmentedButtons, TextInput } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function MealsScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
   
+  const [activeTab, setActiveTab] = useState('plan'); // 'library' or 'plan'
   const [categories, setCategories] = useState<DishCategory[]>([]);
   const [dishes, setDishes] = useState<Dish[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isManageMode, setIsManageMode] = useState(false);
+
+  // Planning states
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [currentPlan, setCurrentPlan] = useState<MealPlan | null>(null);
+  const [isDishPickerVisible, setIsDishPickerVisible] = useState(false);
+    const [pickerCategoryId, setPickerCategoryId] = useState<string>('all');
+    const [activeMealSlot, setActiveMealSlot] = useState<'breakfast' | 'lunch' | 'dinner' | 'snacks' | null>(null);
 
   // Modals
   const [isDishModalVisible, setIsDishModalVisible] = useState(false);
@@ -31,6 +41,12 @@ export default function MealsScreen() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'plan') {
+      loadMealPlan();
+    }
+  }, [activeTab, selectedDate]);
 
   const loadData = async () => {
     try {
@@ -66,6 +82,60 @@ export default function MealsScreen() {
     }
   };
 
+  const loadMealPlan = async () => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const plan = await mealPlanService.getMealPlanByDate(dateStr);
+    setCurrentPlan(plan);
+  };
+
+  const handleSaveMealPlan = async (updatedPlan: MealPlan) => {
+    try {
+      await mealPlanService.upsertMealPlan(updatedPlan);
+      setCurrentPlan(updatedPlan);
+    } catch (error) {
+      console.error('保存计划失败:', error);
+      Alert.alert('错误', '保存计划失败，请重试');
+    }
+  };
+
+  const addDishToPlan = (dish: Dish) => {
+    if (!activeMealSlot) return;
+    
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const newPlan: MealPlan = currentPlan || {
+      id: Math.random().toString(36).substr(2, 9),
+      date: dateStr,
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snacks: [],
+    };
+
+    const slotDishes = [...(newPlan[activeMealSlot] || [])];
+    if (!slotDishes.find(d => d.id === dish.id)) {
+      slotDishes.push(dish);
+    }
+    
+    const updatedPlan = {
+      ...newPlan,
+      [activeMealSlot]: slotDishes
+    };
+
+    handleSaveMealPlan(updatedPlan);
+    setIsDishPickerVisible(false);
+  };
+
+  const removeDishFromPlan = (slot: 'breakfast' | 'lunch' | 'dinner' | 'snacks', dishId: string) => {
+    if (!currentPlan) return;
+    
+    const updatedPlan = {
+      ...currentPlan,
+      [slot]: (currentPlan[slot] || []).filter(d => d.id !== dishId)
+    };
+    
+    handleSaveMealPlan(updatedPlan);
+  };
+
   const filteredDishes = useMemo(() => {
     let result = dishes;
     if (activeCategoryId !== 'all') {
@@ -88,8 +158,9 @@ export default function MealsScreen() {
       }
       setIsDishModalVisible(false);
       loadData();
-    } catch (error) {
-      Alert.alert('保存失败', '请检查网络连接');
+    } catch (error: any) {
+      console.error('保存菜品失败:', error);
+      Alert.alert('保存失败', `请检查网络连接: ${error.message || '未知错误'}`);
     }
   };
 
@@ -108,8 +179,9 @@ export default function MealsScreen() {
       }
       setIsCategoryModalVisible(false);
       loadData();
-    } catch (error) {
-      Alert.alert('保存失败', '请检查网络连接');
+    } catch (error: any) {
+      console.error('保存分类失败:', error);
+      Alert.alert('保存失败', `请检查网络连接: ${error.message || '未知错误'}`);
     }
   };
 
@@ -132,80 +204,81 @@ export default function MealsScreen() {
     
     try {
       await dishCategoryService.saveCategories(updatedCategories);
-    } catch (error) {
+    } catch (error: any) {
       console.error('保存分类排序失败:', error);
-      Alert.alert('排序保存失败', '请检查网络连接');
+      Alert.alert('排序保存失败', `请检查网络连接: ${error.message || '未知错误'}`);
     }
   };
 
   const renderCategoryItem = ({ item: cat, drag, isActive, getIndex }: RenderItemParams<DishCategory>) => {
     const index = getIndex();
+    const isSelected = activeCategoryId === cat.id;
+
     return (
       <ScaleDecorator>
-        <View
+        <TouchableOpacity
+          onLongPress={isManageMode ? drag : undefined}
+          onPress={() => setActiveCategoryId(cat.id)}
+          disabled={isActive}
+          activeOpacity={0.7}
           style={[
             styles.categoryTab,
-            activeCategoryId === cat.id && [styles.activeCategoryTab, { backgroundColor: theme.primary + '15' }],
-            isActive && { backgroundColor: theme.primary + '10' }
+            isSelected && [styles.activeCategoryTab, { backgroundColor: theme.primary + '10' }],
+            isActive && { backgroundColor: theme.primary + '20' }
           ]}
         >
-          <TouchableOpacity
-            style={styles.categoryNameArea}
-            onPress={() => setActiveCategoryId(cat.id)}
-            onLongPress={isManageMode ? drag : undefined}
-            disabled={isActive}
-          >
+          <View style={styles.categoryMainRow}>
             {isManageMode && (
-              <View style={styles.dragIndicator}>
-                <GripVertical size={12} color={theme.icon} />
+              <View style={styles.dragHandle}>
+                <GripVertical size={14} color={theme.icon} />
               </View>
             )}
-            <Text style={[
-              styles.categoryText,
-              { color: activeCategoryId === cat.id ? theme.primary : theme.text },
-              activeCategoryId === cat.id && styles.activeCategoryText
-            ]}>{cat.name}</Text>
-          </TouchableOpacity>
+            <Text 
+              numberOfLines={1}
+              style={[
+                styles.categoryText,
+                { color: isSelected ? theme.primary : theme.text },
+                isSelected && styles.activeCategoryText
+              ]}
+            >
+              {cat.name}
+            </Text>
+          </View>
           
-          {isManageMode && (
-            <View style={styles.catManageContainer}>
-            <View style={styles.sortActions}>
-              <TouchableOpacity 
-                disabled={index === 0}
-                onPress={() => handleMoveCategory(index!, 'up')}
-                style={styles.sortBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <ChevronUp size={16} color={index === 0 ? theme.icon + '40' : theme.primary} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                disabled={index === categories.length - 1}
-                onPress={() => handleMoveCategory(index!, 'down')}
-                style={styles.sortBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <ChevronDown size={16} color={index === categories.length - 1 ? theme.icon + '40' : theme.primary} />
-              </TouchableOpacity>
-            </View>
-              
-              <View style={styles.catActions}>
+          {isManageMode && isSelected && (
+            <View style={styles.catManagePanel}>
+              <View style={styles.manageRow}>
                 <TouchableOpacity 
-                  style={styles.catActionBtn}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  disabled={index === 0}
+                  onPress={() => handleMoveCategory(index!, 'up')}
+                  style={[styles.miniActionBtn, index === 0 && styles.disabledBtn]}
+                >
+                  <ChevronUp size={14} color={index === 0 ? theme.icon + '40' : theme.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  disabled={index === categories.length - 1}
+                  onPress={() => handleMoveCategory(index!, 'down')}
+                  style={[styles.miniActionBtn, index === categories.length - 1 && styles.disabledBtn]}
+                >
+                  <ChevronDown size={14} color={index === categories.length - 1 ? theme.icon + '40' : theme.primary} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.manageRow}>
+                <TouchableOpacity 
+                  style={styles.miniActionBtn}
                   onPress={() => {
                     setEditingCategory(cat);
                     setIsCategoryModalVisible(true);
                   }}
                 >
-                  <Edit2 size={14} color={theme.primary} />
+                  <Edit2 size={12} color={theme.primary} />
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.catActionBtn}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={[styles.miniActionBtn, { backgroundColor: '#FFF5F5' }]}
                   onPress={() => {
                     Alert.alert(
                       '删除分类',
-                      `确定要删除 "${cat.name}" 吗？这不会删除该分类下的菜品。`,
+                      `确定要删除 "${cat.name}" 吗？`,
                       [
                         { text: '取消', style: 'cancel' },
                         { 
@@ -216,8 +289,9 @@ export default function MealsScreen() {
                               await dishCategoryService.deleteCategory(cat.id);
                               if (activeCategoryId === cat.id) setActiveCategoryId('all');
                               loadData();
-                            } catch (error) {
-                              Alert.alert('删除失败', '请检查网络连接');
+                            } catch (error: any) {
+                              console.error('删除分类失败:', error);
+                              Alert.alert('删除失败', `请检查网络连接: ${error.message || '未知错误'}`);
                             }
                           }
                         }
@@ -225,12 +299,12 @@ export default function MealsScreen() {
                     );
                   }}
                 >
-                  <Trash2 size={14} color="#FF5252" />
+                  <Trash2 size={12} color="#FF5252" />
                 </TouchableOpacity>
               </View>
             </View>
           )}
-        </View>
+        </TouchableOpacity>
       </ScaleDecorator>
     );
   };
@@ -250,8 +324,9 @@ export default function MealsScreen() {
               try {
                 await dishService.updateDish(item.id, { favorite: !item.favorite });
                 loadData();
-              } catch (error) {
-                Alert.alert('更新失败', '请检查网络连接');
+              } catch (error: any) {
+                console.error('收藏更新失败:', error);
+                Alert.alert('更新失败', `请检查网络连接: ${error.message || '未知错误'}`);
               }
             }}
             style={styles.actionBtn}
@@ -283,8 +358,9 @@ export default function MealsScreen() {
                           try {
                             await dishService.deleteDish(item.id);
                             loadData();
-                          } catch (error) {
-                            Alert.alert('删除失败', '请检查网络连接');
+                          } catch (error: any) {
+                            console.error('删除菜品失败:', error);
+                            Alert.alert('删除失败', `请检查网络连接: ${error.message || '未知错误'}`);
                           }
                         }
                       }
@@ -302,96 +378,251 @@ export default function MealsScreen() {
     </Card>
   );
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <View style={styles.header}>
-        <Searchbar
-          placeholder="搜索菜品..."
-          onChangeText={setSearchQuery}
-          value={searchQuery}
-          style={[styles.searchBar, { backgroundColor: theme.card }]}
-          inputStyle={{ color: theme.text }}
-          iconColor={theme.icon}
-          placeholderTextColor={theme.icon}
-        />
-        <IconButton
-          icon={isManageMode ? "check" : "cog"}
-          mode="contained"
-          containerColor={isManageMode ? theme.primary : theme.card}
-          iconColor={isManageMode ? "#fff" : theme.primary}
-          onPress={() => setIsManageMode(!isManageMode)}
-        />
-      </View>
+  const openDishPicker = (slot: 'breakfast' | 'lunch' | 'dinner' | 'snacks') => {
+    setActiveMealSlot(slot);
+    setSearchQuery('');
+    setPickerCategoryId('all');
+    setIsDishPickerVisible(true);
+  };
 
-      <View style={styles.content}>
-        {/* Left Categories */}
-        <View style={[styles.leftColumn, { borderRightColor: theme.border }]}>
-          <TouchableOpacity
-            style={[
-              styles.categoryTab,
-              activeCategoryId === 'all' && [styles.activeCategoryTab, { backgroundColor: theme.primary + '15' }]
-            ]}
-            onPress={() => setActiveCategoryId('all')}
-          >
-            <Text style={[
-              styles.categoryText,
-              { color: activeCategoryId === 'all' ? theme.primary : theme.text },
-              activeCategoryId === 'all' && styles.activeCategoryText
-            ]}>全部</Text>
-          </TouchableOpacity>
-          
-          <DraggableFlatList
-            data={categories}
-            onDragEnd={({ data }) => {
-              const updatedCategories = data.map((cat, idx) => ({ ...cat, order: idx + 1 }));
-              setCategories(updatedCategories);
-              dishCategoryService.saveCategories(updatedCategories);
-            }}
-            keyExtractor={(item) => item.id}
-            renderItem={renderCategoryItem}
+  const renderMealSlot = (slot: 'breakfast' | 'lunch' | 'dinner' | 'snacks', title: string, icon: React.ReactNode) => {
+    const slotDishes = currentPlan ? currentPlan[slot] || [] : [];
+    
+    return (
+      <View style={styles.planSlot}>
+        <View style={styles.slotHeader}>
+          <View style={styles.slotTitleRow}>
+            {icon}
+            <Text style={[styles.slotTitle, { color: theme.text }]}>{title}</Text>
+          </View>
+          <IconButton 
+            icon="plus" 
+            size={20} 
+            mode="contained-tonal"
+            onPress={() => openDishPicker(slot)}
           />
-          
-          {isManageMode && (
-            <TouchableOpacity 
-              style={styles.addCategoryBtn}
-              onPress={() => {
-                setEditingCategory({ name: '' });
-                setIsCategoryModalVisible(true);
-              }}
-            >
-              <Plus size={20} color={theme.primary} />
-            </TouchableOpacity>
+        </View>
+        
+        <View style={styles.slotDishes}>
+          {slotDishes.length > 0 ? (
+            slotDishes.map(dish => (
+              <View key={dish.id} style={styles.planDishItem}>
+                <Text style={[styles.planDishName, { color: theme.text }]}>{dish.name}</Text>
+                <TouchableOpacity onPress={() => removeDishFromPlan(slot, dish.id)}>
+                  <Trash2 size={16} color="#FF5252" />
+                </TouchableOpacity>
+              </View>
+            ))
+          ) : (
+            <View style={styles.emptySlot}>
+              <Text style={styles.emptySlotText}>尚未安排菜品</Text>
+            </View>
           )}
         </View>
+      </View>
+    );
+  };
 
-        {/* Right Dishes List */}
-        <View style={styles.rightColumn}>
-          <FlatList
-            data={filteredDishes}
-            renderItem={renderDishItem}
-            keyExtractor={item => item.id}
-            contentContainerStyle={styles.dishList}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Utensils size={48} color={theme.icon} />
-                <Text style={{ color: theme.icon, marginTop: 12 }}>还没有菜品哦</Text>
-              </View>
-            }
-          />
-        </View>
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={styles.tabHeader}>
+        <SegmentedButtons
+          value={activeTab}
+          onValueChange={setActiveTab}
+          buttons={[
+            { value: 'plan', label: '餐饮计划', icon: 'calendar-clock' },
+            { value: 'library', label: '菜品管理', icon: 'book-open-variant' },
+          ]}
+          style={styles.segmentedButtons}
+          theme={{ colors: { secondaryContainer: theme.primary + '20', onSecondaryContainer: theme.primary } }}
+        />
       </View>
 
-      {isManageMode && (
-        <FAB
-          icon="plus"
-          style={[styles.fab, { backgroundColor: theme.primary }]}
-          color="#fff"
-          onPress={() => {
-            setEditingDish({ name: '', categoryId: activeCategoryId === 'all' ? categories[0]?.id : activeCategoryId, favorite: false });
-            setIsDishModalVisible(true);
-          }}
-        />
+      {activeTab === 'library' ? (
+        <>
+          <View style={styles.header}>
+            <Searchbar
+              placeholder="搜索菜品..."
+              onChangeText={setSearchQuery}
+              value={searchQuery}
+              style={[styles.searchBar, { backgroundColor: theme.card }]}
+              inputStyle={{ color: theme.text }}
+              iconColor={theme.icon}
+              placeholderTextColor={theme.icon}
+            />
+            <IconButton
+              icon={isManageMode ? "check" : "cog"}
+              mode="contained"
+              containerColor={isManageMode ? theme.primary : theme.card}
+              iconColor={isManageMode ? "#fff" : theme.primary}
+              onPress={() => setIsManageMode(!isManageMode)}
+            />
+          </View>
+
+          <View style={styles.content}>
+            {/* Left Categories */}
+            <View style={[styles.leftColumn, { borderRightColor: theme.border }]}>
+              <TouchableOpacity
+                style={[
+                  styles.categoryTab,
+                  activeCategoryId === 'all' && [styles.activeCategoryTab, { backgroundColor: theme.primary + '10' }]
+                ]}
+                onPress={() => setActiveCategoryId('all')}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.categoryText,
+                  { color: activeCategoryId === 'all' ? theme.primary : theme.text },
+                  activeCategoryId === 'all' && styles.activeCategoryText
+                ]}>全部</Text>
+              </TouchableOpacity>
+              
+              <DraggableFlatList
+                data={categories}
+                onDragEnd={({ data }) => {
+                  const updatedCategories = data.map((cat, idx) => ({ ...cat, order: idx + 1 }));
+                  setCategories(updatedCategories);
+                  dishCategoryService.saveCategories(updatedCategories);
+                }}
+                keyExtractor={(item) => item.id}
+                renderItem={renderCategoryItem}
+              />
+              
+              {isManageMode && (
+                <TouchableOpacity 
+                  style={styles.addCategoryBtn}
+                  onPress={() => {
+                    setEditingCategory({ name: '' });
+                    setIsCategoryModalVisible(true);
+                  }}
+                >
+                  <Plus size={20} color={theme.primary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Right Dishes List */}
+            <View style={styles.rightColumn}>
+              <FlatList
+                data={filteredDishes}
+                renderItem={renderDishItem}
+                keyExtractor={item => item.id}
+                contentContainerStyle={styles.dishList}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Utensils size={48} color={theme.icon} />
+                    <Text style={{ color: theme.icon, marginTop: 12 }}>还没有菜品哦</Text>
+                  </View>
+                }
+              />
+            </View>
+          </View>
+
+          {isManageMode && (
+            <FAB
+              icon="plus"
+              style={[styles.fab, { backgroundColor: theme.primary }]}
+              color="#fff"
+              onPress={() => {
+                setEditingDish({ name: '', categoryId: activeCategoryId === 'all' ? categories[0]?.id : activeCategoryId, favorite: false });
+                setIsDishModalVisible(true);
+              }}
+            />
+          )}
+        </>
+      ) : (
+        <View style={styles.planningContent}>
+          <View style={styles.dateNav}>
+            <IconButton 
+              icon={({ size, color }) => <ChevronLeft size={size} color={color} />} 
+              onPress={() => setSelectedDate(subDays(selectedDate, 1))} 
+            />
+            <TouchableOpacity 
+              style={styles.dateInfo} 
+              onPress={() => setSelectedDate(new Date())}
+              activeOpacity={0.7}
+            >
+              <Calendar size={20} color={theme.primary} />
+              <Text style={[styles.dateText, { color: theme.text }]}>
+                {format(selectedDate, 'MM月dd日 EEE', { locale: zhCN })}
+              </Text>
+            </TouchableOpacity>
+            <IconButton 
+              icon={({ size, color }) => <ChevronRight size={size} color={color} />} 
+              onPress={() => setSelectedDate(addDays(selectedDate, 1))} 
+            />
+          </View>
+
+          <ScrollView style={styles.planScroll} showsVerticalScrollIndicator={false}>
+            {renderMealSlot('breakfast', '早餐', <Coffee size={24} color="#FF9F43" />)}
+            {renderMealSlot('lunch', '午餐', <Sun size={24} color="#FF6B6B" />)}
+            {renderMealSlot('dinner', '晚餐', <Moon size={24} color="#576574" />)}
+            {renderMealSlot('snacks', '加餐/零食', <Cookie size={24} color="#A5673F" />)}
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        </View>
       )}
+
+      {/* Dish Picker Modal */}
+      <Modal visible={isDishPickerVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card, maxHeight: '80%' }]}>
+            <View style={styles.pickerHeader}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>选择菜品</Text>
+              <IconButton icon="close" onPress={() => setIsDishPickerVisible(false)} />
+            </View>
+            
+            <Searchbar
+              placeholder="搜索..."
+              onChangeText={setSearchQuery}
+              value={searchQuery}
+              style={styles.pickerSearch}
+            />
+
+            <View style={styles.pickerCategoryList}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <Chip 
+                  selected={pickerCategoryId === 'all'} 
+                  onPress={() => setPickerCategoryId('all')}
+                  style={styles.pickerChip}
+                >全部</Chip>
+                {categories.map(cat => (
+                  <Chip 
+                    key={cat.id} 
+                    selected={pickerCategoryId === cat.id} 
+                    onPress={() => setPickerCategoryId(cat.id)}
+                    style={styles.pickerChip}
+                  >{cat.name}</Chip>
+                ))}
+              </ScrollView>
+            </View>
+            
+            <ScrollView style={styles.pickerList}>
+              {dishes
+                .filter(d => {
+                  const matchSearch = d.name.toLowerCase().includes(searchQuery.toLowerCase());
+                  const matchCategory = pickerCategoryId === 'all' || d.categoryId === pickerCategoryId;
+                  return matchSearch && matchCategory;
+                })
+                .map(dish => (
+                  <TouchableOpacity 
+                    key={dish.id} 
+                    style={styles.pickerItem}
+                    onPress={() => addDishToPlan(dish)}
+                  >
+                    <View>
+                      <Text style={{ color: theme.text, fontSize: 16 }}>{dish.name}</Text>
+                      <Text style={{ color: theme.icon, fontSize: 12 }}>
+                        {categories.find(c => c.id === dish.categoryId)?.name}
+                      </Text>
+                    </View>
+                    <Plus size={20} color={theme.primary} />
+                  </TouchableOpacity>
+                ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Dish Modal */}
       <Modal visible={isDishModalVisible} animationType="slide" transparent>
@@ -468,6 +699,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  tabHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  segmentedButtons: {
+    borderRadius: 12,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -483,45 +722,220 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
   },
+  planningContent: {
+    flex: 1,
+    backgroundColor: '#FAFAFA',
+  },
+  dateNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: '#FFF',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
+  dateInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  planScroll: {
+    flex: 1,
+    padding: 16,
+  },
+  planSlot: {
+    marginBottom: 20,
+    borderRadius: 20,
+    backgroundColor: '#FFF',
+    padding: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+  },
+  slotHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  slotTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  slotTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  slotDishes: {
+    gap: 8,
+  },
+  planDishItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+  },
+  planDishName: {
+    fontSize: 15,
+    flex: 1,
+  },
+  emptySlot: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 12,
+  },
+  emptySlotText: {
+    fontSize: 13,
+    marginTop: 4,
+    opacity: 0.5,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  pickerSearch: {
+    height: 44,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  pickerCategoryList: {
+    marginBottom: 12,
+  },
+  pickerChip: {
+    marginRight: 8,
+    height: 32,
+  },
+  pickerList: {
+    maxHeight: 400,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.05)',
+  },
   leftColumn: {
     width: 100,
+    backgroundColor: '#FAFAFA',
     borderRightWidth: 1,
   },
   rightColumn: {
     flex: 1,
+    backgroundColor: '#FFF',
   },
   categoryTab: {
     paddingVertical: 16,
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 64,
+    borderLeftWidth: 4,
+    borderLeftColor: 'transparent',
   },
   activeCategoryTab: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B6B', // theme.primary
+    borderLeftColor: '#FF6B6B',
+  },
+  categoryMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
   categoryText: {
     fontSize: 14,
     textAlign: 'center',
+    fontWeight: '500',
   },
   activeCategoryText: {
     fontWeight: 'bold',
   },
+  catManagePanel: {
+    width: '100%',
+    marginTop: 12,
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.06)',
+  },
+  manageRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  miniActionBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+  },
+  disabledBtn: {
+    opacity: 0.5,
+    elevation: 0,
+    backgroundColor: 'transparent',
+  },
+  dragHandle: {
+    marginRight: 6,
+  },
+  addCategoryBtn: {
+    padding: 16,
+    margin: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(0,0,0,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
   dishList: {
-    padding: 12,
-    gap: 12,
+    padding: 16,
+    gap: 16,
   },
   dishCard: {
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
   },
   dishContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    padding: 4,
   },
   dishInfo: {
     flex: 1,
+    paddingLeft: 4,
   },
   dishName: {
     fontSize: 16,
@@ -530,44 +944,50 @@ const styles = StyleSheet.create({
   dishCategory: {
     fontSize: 12,
     marginTop: 4,
+    opacity: 0.6,
   },
   dishActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
   },
   actionBtn: {
     padding: 8,
+    borderRadius: 8,
   },
   fab: {
     position: 'absolute',
     margin: 16,
     right: 0,
     bottom: 0,
+    borderRadius: 16,
+    elevation: 4,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
   },
   modalContent: {
-    borderRadius: 20,
-    padding: 20,
-    gap: 16,
+    borderRadius: 24,
+    padding: 24,
+    gap: 20,
+    elevation: 5,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   input: {
-    marginBottom: 8,
+    backgroundColor: 'transparent',
   },
   pickerContainer: {
-    marginVertical: 8,
+    marginTop: 4,
   },
   chip: {
     marginRight: 8,
+    borderRadius: 8,
   },
   modalActions: {
     flexDirection: 'row',
@@ -579,50 +999,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 100,
-  },
-  addCategoryBtn: {
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryTabContainer: {
-    position: 'relative',
-  },
-  catManageContainer: {
-    width: '100%',
-    paddingHorizontal: 4,
-    gap: 8,
-    marginTop: 4,
-  },
-  sortActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  sortBtn: {
-    padding: 4,
-  },
-  catActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
-    paddingTop: 8,
-  },
-  catActionBtn: {
-    padding: 4,
-  },
-  categoryNameArea: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-    width: '100%',
-  },
-  dragIndicator: {
-    marginRight: 4,
+    padding: 32,
     opacity: 0.5,
   },
 });
