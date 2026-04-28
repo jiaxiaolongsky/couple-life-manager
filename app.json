@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "couplelifemanager",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.coupleapp.lifemanager",
@@ -69,7 +69,7 @@
             "targetSdkVersion": 34,
             "minSdkVersion": 24
           },
-          "kotlinVersion": "2.0.21"
+          "kotlinVersion": "1.9.24"
         }
       ],
       "expo-web-browser"
