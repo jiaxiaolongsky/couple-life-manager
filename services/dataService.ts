@@ -344,11 +344,17 @@ export const dishCategoryService = {
     }
   },
 
-  async addCategory(category: DishCategory): Promise<void> {
+  async addCategory(category: Omit<DishCategory, 'id'> & { id?: string }): Promise<void> {
     try {
+      const insertData = {
+        id: category.id || generateId(),
+        name: category.name,
+        order: category.order || 0
+      };
+
       const { error } = await supabase
         .from('dish_categories')
-        .insert([category]);
+        .insert([insertData]);
       if (error) {
         console.error('添加分类数据库报错:', error);
         throw new Error(`数据库错误: ${error.message} (${error.code})`);
