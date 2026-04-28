@@ -14,7 +14,8 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m"
+        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
       }
     }
   },
