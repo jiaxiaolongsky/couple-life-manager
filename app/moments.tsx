@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Modal, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera, Image as ImageIcon, Plus, ArrowLeft, Trash2, Calendar as CalendarIcon, MapPin } from 'lucide-react-native';
-import * as ImagePicker from 'expo-image-picker';
-import { momentService } from '@/services/dataService';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Card, Button, TextInput, IconButton, Avatar } from 'react-native-paper';
+import { momentService } from '@/services/dataService';
 import { Moment } from '@/types';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
+import { ArrowLeft, Camera, Plus } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Avatar, Button, Card, IconButton, TextInput } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function MomentsScreen() {
   const router = useRouter();
@@ -45,7 +45,7 @@ export default function MomentsScreen() {
     if (!newContent && selectedImages.length === 0) return;
     
     const newMoment: Moment = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: '', // 由服务层生成
       date: new Date().toISOString().split('T')[0],
       content: newContent,
       images: selectedImages,
@@ -56,6 +56,16 @@ export default function MomentsScreen() {
     setSelectedImages([]);
     setIsModalVisible(false);
     loadData();
+  };
+
+  const handleDelete = async (id: string) => {
+    Alert.alert('确认删除', '确定要删除这条记录吗？', [
+      { text: '取消', style: 'cancel' },
+      { text: '确定', onPress: async () => {
+        await momentService.deleteMoment(id);
+        loadData();
+      }, style: 'destructive' }
+    ]);
   };
 
   return (
@@ -73,10 +83,11 @@ export default function MomentsScreen() {
             <Card.Content>
               <View style={styles.momentHeader}>
                 <Avatar.Text size={32} label="US" style={{ backgroundColor: theme.primary }} color="#fff" />
-                <View style={{ marginLeft: 10 }}>
+                <View style={{ marginLeft: 10, flex: 1 }}>
                   <Text style={[styles.momentUser, { color: theme.text }]}>我们</Text>
                   <Text style={[styles.momentDate, { color: theme.icon }]}>{item.date}</Text>
                 </View>
+                <IconButton icon="trash-can-outline" iconColor={theme.error} size={20} onPress={() => handleDelete(item.id)} />
               </View>
               
               <Text style={[styles.momentContent, { color: theme.text }]}>{item.content}</Text>

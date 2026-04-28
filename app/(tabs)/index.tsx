@@ -1,10 +1,10 @@
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { anniversaryService, expenseService, inventoryService, mealPlanService, shoppingService } from '@/services/dataService';
+import { anniversaryService, dbInitService, expenseService, inventoryService, mealPlanService, shoppingService } from '@/services/dataService';
 import { WeatherData, weatherService } from '@/services/weatherService';
 import { useRouter } from 'expo-router';
 import { AlertTriangle, Camera, ChevronRight, CloudSun, Heart, Plus, ShoppingBag, TrendingUp, Utensils, Wallet } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Avatar, Button, Card, ProgressBar } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +24,7 @@ export default function HomeScreen() {
   const [weatherLoading, setWeatherLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [greeting, setGreeting] = useState('早安');
+  const [dbError, setDbError] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -43,14 +44,16 @@ export default function HomeScreen() {
     try {
       setLoading(true);
       setWeatherLoading(true);
+      setDbError(null);
       
-      // 初始化数据库表
-      try {
-        const { dbInitService } = require('@/services/dataService');
-        await dbInitService.initializeDatabase();
-      } catch (dbInitError) {
-        console.error('数据库初始化尝试失败:', dbInitError);
+      // 测试数据库连接
+      const isConnected = await dbInitService.testConnection();
+      if (!isConnected) {
+        setDbError('无法连接到数据库，请检查网络或代理设置');
       }
+
+      // 初始化数据库表 (非阻塞)
+      dbInitService.initializeDatabase().catch((err: any) => console.error('DB Init background error:', err));
       
       const total = await expenseService.getTotalExpenses();
       setTotalExpenses(total);
@@ -110,6 +113,14 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}
       >
+        {/* Database Connection Error Hint */}
+        {dbError && (
+          <View style={[styles.dbErrorHint, { backgroundColor: theme.error + '15' }]}>
+            <AlertTriangle size={16} color={theme.error} />
+            <Text style={[styles.dbErrorText, { color: theme.error }]}>{dbError}</Text>
+          </View>
+        )}
+
         {/* Header Section */}
         <View style={styles.header}>
           <View>
@@ -399,6 +410,19 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 10,
     fontSize: 14,
+  },
+  dbErrorHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 20,
+    gap: 10,
+  },
+  dbErrorText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
   },
   weatherCard: {
     borderRadius: 16,

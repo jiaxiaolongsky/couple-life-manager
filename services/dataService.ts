@@ -8,6 +8,24 @@ const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
 
+// 统一处理数据库错误
+const handleDbError = (error: any, operation: string) => {
+  console.error(`${operation}报错:`, error);
+  
+  let message = error.message || '未知错误';
+  
+  // 处理常见的网络错误
+  if (message.includes('Network request failed') || message.includes('fetch')) {
+    message = '网络请求失败，请检查：\n1. 手机是否联网\n2. 是否能正常访问国际网站 (Supabase 域名可能被拦截)\n3. 手机是否开启了 VPN 但配置不当';
+  } else if (error.code === 'PGRST116') {
+    message = '数据不存在或表结构不正确';
+  } else if (error.code === '23505') {
+    message = '数据已存在，请勿重复添加';
+  }
+  
+  throw new Error(`数据库错误: ${message} (${error.code || 'ERR'})`);
+};
+
 // 数据库初始化服务
 export const dbInitService = {
   async testConnection() {
@@ -155,7 +173,8 @@ export const dbInitService = {
       ];
 
       for (const table of tables) {
-        await supabase.rpc('execute_sql', {
+        // 为每个表同步操作添加 3 秒超时，防止卡住整个初始化过程
+        const syncPromise = supabase.rpc('execute_sql', {
           sql_query: `
             ${table.sql}
             alter table ${table.name} enable row level security;
@@ -163,10 +182,14 @@ export const dbInitService = {
               create policy "Allow all access" on ${table.name} for all using (true) with check (true);
             exception when others then null; end $$;
           `
-        }).catch((e) => {
-          console.log(`Table ${table.name} sync check complete. 如果保存失败，请在 Supabase SQL Editor 中运行以下命令以开启访问权限：`);
-          console.log(`ALTER TABLE ${table.name} ENABLE ROW LEVEL SECURITY;`);
-          console.log(`CREATE POLICY "Allow all access" ON ${table.name} FOR ALL USING (true) WITH CHECK (true);`);
+        });
+
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Sync timeout')), 3000)
+        );
+
+        await Promise.race([syncPromise, timeoutPromise]).catch((e) => {
+          console.log(`Table ${table.name} sync check skip/timeout. 如果保存失败，请在 Supabase SQL Editor 中手动运行命令。`);
         });
       }
       
@@ -316,6 +339,23 @@ export const momentService = {
     } catch (error) {
       console.error('添加点滴失败:', error);
     }
+  },
+
+  async deleteMoment(id: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('moments')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      const list = await this.getMoments();
+      const filtered = list.filter(m => m.id !== id);
+      await AsyncStorage.setItem(STORAGE_KEYS.MOMENTS, JSON.stringify(filtered));
+    } catch (error) {
+      console.error('删除点滴失败:', error);
+    }
   }
 };
 
@@ -356,13 +396,11 @@ export const dishCategoryService = {
         .from('dish_categories')
         .insert([insertData]);
       if (error) {
-        console.error('添加分类数据库报错:', error);
-        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+        handleDbError(error, '添加分类');
       }
       const list = await this.getCategories();
       await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(list));
     } catch (error: any) {
-      console.error('添加分类失败:', error);
       throw error;
     }
   },
@@ -374,13 +412,11 @@ export const dishCategoryService = {
         .update(updates)
         .eq('id', id);
       if (error) {
-        console.error('更新分类数据库报错:', error);
-        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+        handleDbError(error, '更新分类');
       }
       const list = await this.getCategories();
       await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(list));
     } catch (error: any) {
-      console.error('更新分类失败:', error);
       throw error;
     }
   },
@@ -392,13 +428,11 @@ export const dishCategoryService = {
         .delete()
         .eq('id', id);
       if (error) {
-        console.error('删除分类数据库报错:', error);
-        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+        handleDbError(error, '删除分类');
       }
       const list = await this.getCategories();
       await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(list));
     } catch (error: any) {
-      console.error('删除分类失败:', error);
       throw error;
     }
   },
@@ -409,12 +443,10 @@ export const dishCategoryService = {
         .from('dish_categories')
         .upsert(categories);
       if (error) {
-        console.error('保存分类数据库报错:', error);
-        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+        handleDbError(error, '保存分类');
       }
       await AsyncStorage.setItem(STORAGE_KEYS.DISH_CATEGORIES, JSON.stringify(categories));
     } catch (error: any) {
-      console.error('保存分类失败:', error);
       throw error;
     }
   }
@@ -530,15 +562,13 @@ export const dishService = {
         .insert([insertData]);
       
       if (error) {
-        console.error('添加菜品数据库报错:', error);
-        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+        handleDbError(error, '添加菜品');
       }
       
       // 2. 同步更新本地
       const dishes = await this.getDishes();
       await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(dishes));
     } catch (error: any) {
-      console.error('添加菜品失败:', error);
       throw error;
     }
   },
@@ -559,15 +589,13 @@ export const dishService = {
         .eq('id', id);
       
       if (error) {
-        console.error('更新菜品数据库报错:', error);
-        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+        handleDbError(error, '更新菜品');
       }
       
       // 2. 同步更新本地
       const dishes = await this.getDishes();
       await AsyncStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(dishes));
     } catch (error: any) {
-      console.error('更新菜品失败:', error);
       throw error;
     }
   },
@@ -582,8 +610,7 @@ export const dishService = {
         .eq('id', id);
       
       if (error) {
-        console.error('删除菜品数据库报错:', error);
-        throw new Error(`数据库错误: ${error.message} (${error.code})`);
+        handleDbError(error, '删除菜品');
       }
       
       // 2. 同步更新本地
@@ -772,12 +799,33 @@ export const expenseService = {
           payment_method: expense.paymentMethod
         }]);
       
-      if (error) throw error;
+      if (error) {
+        handleDbError(error, '添加消费记录');
+      }
       
       const expenses = await this.getExpenses();
       await AsyncStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
     } catch (error) {
-      console.error('添加消费记录失败:', error);
+      throw error;
+    }
+  },
+
+  // 删除消费记录
+  async deleteExpense(id: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        handleDbError(error, '删除消费记录');
+      }
+      
+      const expenses = await this.getExpenses();
+      await AsyncStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(expenses));
+    } catch (error) {
+      throw error;
     }
   },
 
@@ -847,7 +895,10 @@ export const shoppingService = {
       await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
       const { error } = await supabase
         .from('shopping_list')
-        .upsert(items);
+        .upsert(items.map(item => ({
+          ...item,
+          id: item.id || generateId()
+        })));
       
       if (error) throw error;
     } catch (error) {
@@ -865,12 +916,14 @@ export const shoppingService = {
           id: item.id || generateId()
         }]);
       
-      if (error) throw error;
+      if (error) {
+        handleDbError(error, '添加购物项');
+      }
       
       const items = await this.getShoppingList();
       await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
     } catch (error) {
-      console.error('添加购物项失败:', error);
+      throw error;
     }
   },
 
@@ -882,12 +935,14 @@ export const shoppingService = {
         .update(updates)
         .eq('id', id);
       
-      if (error) throw error;
+      if (error) {
+        handleDbError(error, '更新购物项');
+      }
       
       const items = await this.getShoppingList();
       await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
     } catch (error) {
-      console.error('更新购物项失败:', error);
+      throw error;
     }
   },
 
@@ -899,12 +954,14 @@ export const shoppingService = {
         .delete()
         .eq('id', id);
       
-      if (error) throw error;
+      if (error) {
+        handleDbError(error, '删除购物项');
+      }
       
       const items = await this.getShoppingList();
       await AsyncStorage.setItem(STORAGE_KEYS.SHOPPING_LIST, JSON.stringify(items));
     } catch (error) {
-      console.error('删除购物项失败:', error);
+      throw error;
     }
   },
 

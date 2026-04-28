@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { PieChart, LineChart } from 'react-native-chart-kit';
-import { Plus, Wallet, TrendingUp, Calendar, ChevronRight, FileText } from 'lucide-react-native';
-import { expenseService } from '@/services/dataService';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Card, Button, Avatar, List, IconButton, Chip, Portal, Modal, TextInput } from 'react-native-paper';
+import { expenseService } from '@/services/dataService';
 import { Expense } from '@/types';
+import { FileText, Plus, TrendingUp } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { PieChart } from 'react-native-chart-kit';
+import { Avatar, Button, Card, Chip, IconButton, Modal, Portal, TextInput } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -80,6 +80,11 @@ export default function FinanceScreen() {
       legendFontSize: 12,
     }));
     setCategoryStats(pieData);
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    await expenseService.deleteExpense(id);
+    loadData();
   };
 
   const chartConfig = {
@@ -191,7 +196,12 @@ export default function FinanceScreen() {
                   <Text style={[styles.transactionTitle, { color: theme.text }]}>{expense.description || (expense.category === 'food' ? '餐饮' : '购物')}</Text>
                   <Text style={[styles.transactionDate, { color: theme.icon }]}>{expense.date} · {expense.payer === 'me' ? '我' : '对方'}</Text>
                 </View>
-                <Text style={[styles.transactionAmount, { color: theme.primary }]}>-¥{expense.amount.toFixed(2)}</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[styles.transactionAmount, { color: theme.primary }]}>-¥{expense.amount.toFixed(2)}</Text>
+                  <TouchableOpacity onPress={() => handleDeleteExpense(expense.id)}>
+                    <Text style={{ color: theme.error, fontSize: 12, marginTop: 4 }}>删除</Text>
+                  </TouchableOpacity>
+                </View>
               </Card.Content>
             </Card>
           ))}

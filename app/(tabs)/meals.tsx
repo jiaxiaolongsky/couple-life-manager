@@ -496,13 +496,30 @@ export default function MealsScreen() {
               placeholderTextColor={theme.icon}
             />
             <IconButton
-              icon={isManageMode ? "check" : "cog"}
+              icon={isManageMode ? "check" : "pencil"}
               mode="contained"
               containerColor={isManageMode ? theme.primary : theme.card}
               iconColor={isManageMode ? "#fff" : theme.primary}
               onPress={() => setIsManageMode(!isManageMode)}
             />
           </View>
+          {isManageMode ? (
+            <View style={[styles.manageModeHint, { backgroundColor: theme.primary + '15' }]}>
+              <Text style={[styles.manageModeHintText, { color: theme.primary }]}>编辑模式已开启，您可以添加、编辑或删除菜品和分类</Text>
+            </View>
+          ) : (
+            <TouchableOpacity 
+              style={[styles.manageModeHint, { backgroundColor: theme.primary + '10', borderWidth: 1, borderColor: theme.primary + '30', borderStyle: 'dashed' }]}
+              onPress={() => setIsManageMode(true)}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Edit2 size={16} color={theme.primary} />
+                <Text style={[styles.manageModeHintText, { color: theme.primary, flex: 1 }]}>点击右上角 ✏️ 图标开启编辑模式</Text>
+                <ChevronRight size={16} color={theme.primary} />
+              </View>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.content}>
             {/* Left Categories */}

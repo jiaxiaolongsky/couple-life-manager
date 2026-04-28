@@ -48,7 +48,7 @@ export default function AnniversaryScreen() {
   const handleAdd = async () => {
     if (!newTitle) return;
     const newItem: Anniversary = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: '', // 由服务层生成
       title: newTitle,
       date: newDate,
       type: 'other',
