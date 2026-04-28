@@ -65,10 +65,10 @@
         "expo-build-properties",
         {
           "android": {
-              "compileSdkVersion": 35,
-              "targetSdkVersion": 35,
-              "minSdkVersion": 24
-            }
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 24
+          }
         }
       ],
       "expo-web-browser"
@@ -80,8 +80,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "inz2sbWZab7GEfgOB-r-vFahoxa8WvB9plK6a7y5"
+        "projectId": "6c5e2c7e-5e68-44d8-86ce-63609a85911c"
       }
-    }
+    },
+    "owner": "catch-22"
   }
 }
